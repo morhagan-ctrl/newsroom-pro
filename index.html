@@ -299,14 +299,16 @@ const MONTHLY = [
   { id:'m4', title:'콘텐츠 통계',        assignee:'직원' },
   { id:'m5', title:'후원사 이슈 보고',   assignee:'편집국장' },
 ];
-const FIXED_EVENTS = [
-  { id:'ev1', title:'신규 대학생기자 교육 (4주)',  due:'2026-01-31', type:'정기모임' },
-  { id:'ev2', title:'대학생기자 정기모임',          due:'2026-05-31', type:'정기모임' },
-  { id:'ev3', title:'대학생기자 정기모임',          due:'2026-07-31', type:'정기모임' },
-  { id:'ev4', title:'대학생기자 정기모임',          due:'2026-10-31', type:'정기모임' },
-  { id:'ev5', title:'대학생기자 수료식',            due:'2026-11-30', type:'수료식' },
-  { id:'ev6', title:'신규 대학생기자 모집',         due:'2026-12-31', type:'모집' },
+const DEFAULT_FIXED_EVENTS = [
+  { id:'ev1', title:'신규 대학생기자 교육 (4주)', due:'2026-01-31', type:'정기모임' },
+  { id:'ev2', title:'대학생기자 정기모임',         due:'2026-05-31', type:'정기모임' },
+  { id:'ev3', title:'대학생기자 정기모임',         due:'2026-07-31', type:'정기모임' },
+  { id:'ev4', title:'대학생기자 정기모임',         due:'2026-10-31', type:'정기모임' },
+  { id:'ev5', title:'대학생기자 수료식',           due:'2026-11-30', type:'수료식' },
+  { id:'ev6', title:'신규 대학생기자 모집',        due:'2026-12-31', type:'모집' },
 ];
+// 실제 사용되는 FIXED_EVENTS는 Firebase에서 로드 (S.fixedEvents)
+function getFixedEvents(){ return S.fixedEvents && S.fixedEvents.length ? S.fixedEvents : DEFAULT_FIXED_EVENTS; }
 const KPI_DEF = [
   { key:'newsletter',   label:'뉴스레터 편집',      target:48,  unit:'건', wkTarget:1,    moTarget:4  },
   { key:'contrib',      label:'기고글 편집',         target:96,  unit:'건', wkTarget:2,    moTarget:8  },
@@ -349,7 +351,7 @@ let S = {
   checks:{}, wCounts:{}, kpi:{}, kpiWeekly:{}, kpiMonthly:{}, eventsDone:{}, evKpiTracked:{},
   customTasks:[], kpiSubTab:'weekly', addMode:false,
   addForm:{ title:'', assignee:'직원', type:'event', due:fmtDate(TODAY) },
-  aiText:'', aiResult:null, aiLoading:false, copied:false, showApiSetting:false,
+  aiText:'', aiResult:null, aiLoading:false, copied:false, showApiSetting:false, fixedEvents:[], editingEvent:null,
   apiKey: localStorage.getItem('nr-openai-key')||'', // Firebase 로드 전 로컬 캐시 사용
   aiHistory:[],
   users:[],
@@ -376,14 +378,15 @@ function initFirebase() {
       .onSnapshot({includeMetadataChanges:true}, snap => {
         if (!snap.exists) {
           db.collection(DB_PATH.collection).doc(DB_PATH.doc).set({
-            apiKey:'',checks:{},wCounts:{},kpi:{},kpiWeekly:{},kpiMonthly:{},eventsDone:{},evKpiTracked:{},
+            apiKey:'',fixedEvents:DEFAULT_FIXED_EVENTS,checks:{},wCounts:{},kpi:{},kpiWeekly:{},kpiMonthly:{},eventsDone:{},evKpiTracked:{},
             customTasks:[],aiHistory:[],users:DEFAULT_USERS
           });
           S.fbReady=true; setSyncStatus('online','동기화 완료'); render(); return;
         }
         if (snap.metadata.hasPendingWrites) { setSyncStatus('syncing','저장 중...'); return; }
         const d = snap.data();
-        S.apiKey       = d.apiKey       || S.apiKey || ''; // Firebase 우선, 없으면 로컬 캐시
+        S.apiKey       = d.apiKey       || S.apiKey || '';
+        S.fixedEvents  = d.fixedEvents  && d.fixedEvents.length ? d.fixedEvents : DEFAULT_FIXED_EVENTS; // Firebase 우선, 없으면 로컬 캐시
         if(S.apiKey) localStorage.setItem('nr-openai-key', S.apiKey); // 로컬 캐시 갱신
         S.checks       = d.checks       || {};
         S.wCounts      = d.wCounts      || {};
@@ -427,14 +430,10 @@ function getRoleBadgeClass(role) {
 }
 function getInitial(name) { return name ? name[0] : '?'; }
 function assigneeMatch(taskAssignee) {
+  // 전체 필터 — 모두 표시
   if (S.filter==='all') return true;
-  const cu = getCurrentUser();
-  if (!cu) return true;
-  if (isAdmin()) return true; // 편집국장 — 전체
-  if (isPublisher()) {        // 대표(발행인) — 후원사+공통
-    return taskAssignee==='공통'||taskAssignee==='대표'||taskAssignee==='편집국장';
-  }
-  if (taskAssignee === cu.role) return true;
+  // 특정 역할 필터 선택 시 — 역할 일치 항목만
+  if (taskAssignee === S.filter) return true;
   if (taskAssignee === '공통') return true;
   return false;
 }
@@ -559,7 +558,7 @@ function confirmUserSelect() {
   S.currentUserId = uid;
   localStorage.setItem('nr-uid', uid);
   const cu = getCurrentUser();
-  S.filter = cu ? cu.role : 'all';
+  S.filter = 'all'; // 로그인 시 전체 보기로 시작, 필터 버튼으로 변경 가능
   closeUserOverlay();
   showToast(`✓ ${cu?cu.name:'사용자'}님으로 로그인됩니다`);
   render();
@@ -679,7 +678,7 @@ function taskCard(t,type,isCustom){
   const roleCls=ADMIN_ROLES.includes(t.assignee)?'b-rep':t.assignee==='직원'?'b-staff':'b-both';
   const del=isCustom?`<button class="del-btn" onclick="event.stopPropagation();deleteCustom('${t.id}')">삭제</button>`:'';
   // 주간 카운트 기반 (t.t > 1)
-  if(type==='weekly'&&t.t&&t.t>1){
+  if(type==='weekly'){
     const cur=getWCount(t.id),tgt=t.t,pct=Math.round(cur/tgt*100);
     const col=cur>=tgt?'var(--green)':urgent?'var(--amber)':'var(--text3)';
     const cc='task-card'+(done?' done-c':urgent?' urgent':'');
@@ -806,7 +805,7 @@ function renderDashboard(){
   const cu = getCurrentUser();
   const allDaily  =[...DAILY,  ...S.customTasks.filter(t=>t.type==='daily')];
   const allWeekly =[...WEEKLY, ...S.customTasks.filter(t=>t.type==='weekly')];
-  const allEvs    =[...FIXED_EVENTS,...S.customTasks.filter(t=>t.type==='event'&&t.due)];
+  const allEvs    =[...getFixedEvents(),...S.customTasks.filter(t=>t.type==='event'&&t.due)];
   const todayTasks=allDaily.filter(t=>assigneeMatch(t.assignee));
   const todayDone =todayTasks.filter(t=>isChecked('daily',t.id)).length;
   const weekTasks =allWeekly.filter(t=>assigneeMatch(t.assignee));
@@ -866,7 +865,7 @@ function renderChecklist(){
     <button class="toggle-done" onclick="toggleDone()">${S.showDone?'완료 숨기기':'완료 보기'}</button>
   </div>`;
   if(S.clTab==='events'){
-    const allEvs=[...FIXED_EVENTS,...S.customTasks.filter(t=>t.type==='event'&&t.due)].sort((a,b)=>new Date(a.due)-new Date(b.due));
+    const allEvs=[...getFixedEvents(),...S.customTasks.filter(t=>t.type==='event'&&t.due)].sort((a,b)=>new Date(a.due)-new Date(b.due));
     return sub+flt
       +`<div style="padding:6px 16px 4px;font-size:12px;color:var(--text2);line-height:1.5;background:#fffbeb">황색 태그 이벤트 완료 시 KPI 자동 반영</div>`
       +allEvs.map(ev=>eventCard(ev,!!ev.createdAt)).join('');
@@ -1400,12 +1399,33 @@ function renderAdmin(){
       <div style="font-size:11px;font-weight:700;color:${col};min-width:44px;text-align:right">${cur}/${k.target}</div>
     </div>`;
   }).join('');
+  // 이벤트 편집 UI
+  const evRows = getFixedEvents().map((ev,i)=>`
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">
+      <div style="flex:1">
+        <input value="${ev.title}" onchange="updateFixedEvent(${i},'title',this.value)"
+          style="width:100%;border:1px solid #e2e8f0;border-radius:6px;padding:6px 8px;font-size:12px;font-family:inherit;background:#f8fafc"/>
+      </div>
+      <input type="date" value="${ev.due}" onchange="updateFixedEvent(${i},'due',this.value)"
+        style="border:1px solid #e2e8f0;border-radius:6px;padding:6px 8px;font-size:12px;font-family:inherit;background:#f8fafc;flex-shrink:0"/>
+      <button onclick="removeFixedEvent(${i})"
+        style="width:28px;height:28px;border:none;background:#fee2e2;color:var(--red);border-radius:6px;cursor:pointer;font-size:14px;flex-shrink:0">×</button>
+    </div>`).join('');
+
   return `<div style="padding:16px">
     <div style="font-size:13px;font-weight:700;color:var(--text1);margin-bottom:12px">📊 구성원별 달성 현황</div>
     ${rows}
     <div style="background:var(--card);border-radius:var(--radius);border:1px solid var(--border);padding:14px;margin-top:4px">
       <div style="font-size:13px;font-weight:700;color:var(--text1);margin-bottom:12px">◎ KPI 전체 현황</div>
       ${kpiCards}
+    </div>
+    <div style="background:var(--card);border-radius:var(--radius);border:1px solid var(--border);padding:14px;margin-top:10px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div style="font-size:13px;font-weight:700;color:var(--text1)">📅 정기 이벤트 관리</div>
+        <button onclick="addFixedEvent()" style="padding:6px 12px;background:var(--navy);color:#fff;border:none;border-radius:6px;font-size:12px;cursor:pointer;font-family:inherit">+ 추가</button>
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:10px">제목·날짜 수정 후 자동 저장됩니다</div>
+      ${evRows}
     </div>
   </div>`;
 }
@@ -1461,6 +1481,32 @@ function showToast(msg,cls=''){
   el.textContent=msg; el.className='toast'+(cls?' '+cls:'');
   if(toastTimer) clearTimeout(toastTimer);
   toastTimer=setTimeout(()=>{el.className='toast hidden';},3000);
+}
+function updateFixedEvent(idx, field, value){
+  const evs = [...getFixedEvents()];
+  evs[idx] = {...evs[idx], [field]: value};
+  S.fixedEvents = evs;
+  dbSet('fixedEvents', S.fixedEvents);
+}
+function removeFixedEvent(idx){
+  if(!confirm('이 이벤트를 삭제할까요?')) return;
+  const evs = [...getFixedEvents()];
+  evs.splice(idx, 1);
+  S.fixedEvents = evs;
+  dbSet('fixedEvents', S.fixedEvents);
+  render();
+}
+function addFixedEvent(){
+  const evs = [...getFixedEvents()];
+  evs.push({
+    id: 'ev'+Date.now(),
+    title: '새 이벤트',
+    due: new Date().toISOString().split('T')[0],
+    type: '기타'
+  });
+  S.fixedEvents = evs;
+  dbSet('fixedEvents', S.fixedEvents);
+  render();
 }
 function saveApiKey(){
   if(!isAdmin()){ showToast('편집국장만 API 키를 설정할 수 있습니다','warn'); return; }
