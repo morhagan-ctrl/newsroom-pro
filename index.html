@@ -1,0 +1,1508 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#1a3a5c">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>NEWSROOM PRO</title>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --navy:#1a3a5c; --navy2:#2a527e; --green:#059669; --amber:#d97706;
+      --red:#dc4a3d; --purple:#7c3aed; --bg:#f1f5f9; --card:#ffffff;
+      --border:rgba(0,0,0,0.08); --text1:#0f172a; --text2:#64748b; --text3:#94a3b8; --radius:10px;
+    }
+    html,body{height:100%;font-family:-apple-system,'Apple SD Gothic Neo','Pretendard',sans-serif;background:var(--bg);color:var(--text1);}
+    #app{max-width:480px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;position:relative;}
+    .hdr{background:var(--navy);color:#fff;padding:12px 16px 10px;position:sticky;top:0;z-index:50;display:flex;align-items:center;justify-content:space-between;}
+    .hdr-brand{display:flex;align-items:center;gap:10px;}
+    .hdr-logo{font-size:11px;font-weight:700;letter-spacing:1px;color:#fff;background:rgba(255,255,255,0.2);padding:4px 8px;border-radius:6px;}
+    .hdr-project{font-size:14px;font-weight:500;}
+    .hdr-sub{font-size:11px;opacity:0.65;margin-top:1px;}
+    .hdr-right{display:flex;align-items:center;gap:8px;}
+    .hdr-user{font-size:11px;background:rgba(255,255,255,0.15);padding:4px 10px;border-radius:20px;cursor:pointer;border:none;color:#fff;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .hdr-add{width:30px;height:30px;border-radius:50%;background:rgba(255,255,255,0.2);border:none;color:#fff;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;}
+    .content{flex:1;padding-bottom:72px;}
+    .sync-bar{font-size:11px;padding:5px 16px;display:flex;align-items:center;gap:6px;}
+    .sync-bar.online{background:#f0fdf4;color:var(--green);}
+    .sync-bar.syncing{background:#fffbeb;color:var(--amber);}
+    .sync-bar.offline{background:#fff1f2;color:var(--red);}
+    .sync-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;}
+    .sync-bar.online .sync-dot{background:var(--green);}
+    .sync-bar.syncing .sync-dot{background:var(--amber);animation:pulse 1s infinite;}
+    .sync-bar.offline .sync-dot{background:var(--red);}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+    #toast{position:fixed;top:70px;left:50%;transform:translateX(-50%);max-width:440px;width:90%;background:var(--navy);color:#fff;padding:10px 16px;border-radius:var(--radius);font-size:13px;z-index:999;display:flex;align-items:center;gap:8px;box-shadow:0 4px 16px rgba(0,0,0,0.15);transition:opacity 0.3s;}
+    #toast.warn{background:var(--amber);}
+    #toast.err{background:var(--red);}
+    #toast.hidden{display:none;}
+    .bottom-nav{position:sticky;bottom:0;display:flex;background:var(--card);border-top:1px solid var(--border);z-index:100;}
+    .nav-btn{flex:1;padding:8px 0 6px;display:flex;flex-direction:column;align-items:center;gap:3px;border:none;background:none;cursor:pointer;font-size:10px;color:var(--text3);}
+    .nav-btn.active{color:var(--navy);font-weight:600;}
+    .nav-icon{font-size:20px;line-height:1;}
+    .nav-dot{width:4px;height:4px;background:var(--navy);border-radius:50%;margin-top:1px;}
+    .card{background:var(--card);border-radius:var(--radius);border:1px solid var(--border);}
+    .section-hd{display:flex;justify-content:space-between;align-items:center;padding:14px 16px 6px;}
+    .section-title{font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;}
+    .section-count{font-size:12px;color:var(--text2);}
+    .link-btn{font-size:12px;color:var(--navy);cursor:pointer;background:none;border:none;}
+    .banner{padding:10px 16px;display:flex;align-items:center;gap:10px;font-size:13px;font-weight:500;}
+    .banner.danger{background:var(--red);color:#fff;}
+    .banner.warn{background:var(--amber);color:#fff;}
+    .banner.ok{background:var(--green);color:#fff;}
+    .stat-row{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:12px 16px;}
+    .stat-card{background:var(--card);border-radius:var(--radius);padding:10px 8px;text-align:center;border:1px solid var(--border);}
+    .stat-val{font-size:24px;font-weight:600;line-height:1;}
+    .stat-lbl{font-size:10px;color:var(--text2);margin-top:3px;}
+    .c-red{color:var(--red);}.c-amber{color:var(--amber);}.c-green{color:var(--green);}.c-blue{color:var(--navy);}
+    .task-wrap{padding:0 16px;}
+    .task-card{display:flex;align-items:center;gap:10px;padding:12px;background:var(--card);border-radius:var(--radius);margin-bottom:6px;cursor:pointer;border:1px solid var(--border);-webkit-tap-highlight-color:transparent;transition:opacity 0.15s;}
+    .task-card.urgent{border-left:3px solid var(--red);}
+    .task-card.custom-t{border-left:3px solid var(--purple);}
+    .task-card.done-c{opacity:0.4;}
+    .chk{width:26px;height:26px;border-radius:6px;border:1.5px solid #cbd5e1;background:var(--card);display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all 0.15s;}
+    .chk.chk-done{background:var(--navy);border-color:var(--navy);}
+    .chk.chk-urgent{border-color:var(--red);}
+    .chk.chk-custom{border-color:var(--purple);}
+    .chk-mark{color:#fff;font-size:13px;line-height:1;}
+    .task-body{flex:1;min-width:0;}
+    .task-title{font-size:13px;font-weight:500;color:var(--text1);line-height:1.35;}
+    .task-title.done-t{text-decoration:line-through;color:var(--text3);font-weight:400;}
+    .task-meta{display:flex;gap:5px;margin-top:4px;flex-wrap:wrap;align-items:center;}
+    .badge{font-size:10px;padding:2px 7px;border-radius:20px;font-weight:500;white-space:nowrap;}
+    .b-rep{background:#d1fae5;color:#065f46;}.b-staff{background:#dbeafe;color:#1e40af;}.b-both{background:#ede9fe;color:#5b21b6;}
+    .b-urgent{background:#fee2e2;color:#991b1b;}.b-custom{background:#ede9fe;color:#5b21b6;}.b-kpi{background:#fef3c7;color:#92400e;}.b-auto{background:#d1fae5;color:#065f46;}
+    .del-btn{padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:none;color:var(--text3);font-size:11px;cursor:pointer;flex-shrink:0;}
+    .ev-card{background:var(--card);border-radius:var(--radius);margin:4px 16px;padding:12px 14px;border:1px solid var(--border);cursor:pointer;display:flex;align-items:flex-start;gap:10px;}
+    .ev-card.ev-overdue{border-left:3px solid var(--red);border-radius:0 var(--radius) var(--radius) 0;}
+    .ev-card.ev-soon{border-left:3px solid var(--amber);border-radius:0 var(--radius) var(--radius) 0;}
+    .ev-card.ev-custom{border-left:3px solid var(--purple);border-radius:0 var(--radius) var(--radius) 0;}
+    .ev-card.ev-done{opacity:0.4;}
+    .ev-d{font-size:11px;font-weight:600;min-width:38px;text-align:center;padding-top:2px;}
+    .ev-info{flex:1;min-width:0;}
+    .ev-title{font-size:13px;font-weight:500;color:var(--text1);line-height:1.35;}
+    .ev-meta{font-size:11px;color:var(--text2);margin-top:3px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
+    .kpi-hero{background:var(--card);border-radius:var(--radius);margin:16px;padding:18px;border:1px solid var(--border);text-align:center;}
+    .kpi-hero-val{font-size:48px;font-weight:700;line-height:1;}
+    .kpi-hero-sub{font-size:12px;color:var(--text2);margin-top:6px;}
+    .kpi-hero-bar{background:#f1f5f9;border-radius:6px;height:10px;margin-top:14px;overflow:hidden;}
+    .kpi-hero-fill{height:10px;border-radius:6px;transition:width 0.5s;}
+    .kpi-grid{padding:0 16px 16px;display:flex;flex-direction:column;gap:8px;}
+    .kpi-card{background:var(--card);border-radius:var(--radius);padding:12px 14px;border:1px solid var(--border);}
+    .kpi-row{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;gap:8px;}
+    .kpi-lbl{font-size:13px;font-weight:500;}
+    .kpi-sub{font-size:10px;color:var(--green);margin-top:2px;}
+    .kpi-ctrl{display:flex;align-items:center;gap:5px;}
+    .kpi-inp{width:50px;text-align:center;border:1px solid #e2e8f0;border-radius:6px;padding:3px 4px;font-size:13px;font-weight:600;}
+    .kpi-tgt{font-size:12px;color:var(--text2);}
+    .step-btn{width:26px;height:26px;border-radius:6px;border:1px solid #e2e8f0;background:#f8fafc;cursor:pointer;font-size:15px;display:flex;align-items:center;justify-content:center;color:var(--text2);}
+    .bar-bg{background:#f1f5f9;border-radius:4px;height:6px;overflow:hidden;}
+    .bar-fill{height:6px;border-radius:4px;transition:width 0.4s;}
+    .kpi-pct{font-size:10px;color:var(--text2);margin-top:4px;text-align:right;}
+    .kpi-subtabs{display:flex;margin:12px 16px 0;background:#f1f5f9;border-radius:10px;padding:3px;gap:2px;}
+    .kpi-stab{flex:1;padding:8px 4px;border:none;background:none;cursor:pointer;font-size:13px;border-radius:8px;color:var(--text2);font-weight:500;}
+    .kpi-stab.active{background:var(--card);color:var(--navy);box-shadow:0 1px 3px rgba(0,0,0,0.08);}
+    .pace-badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:3px 8px;border-radius:20px;font-weight:600;}
+    .pace-ahead{background:#d1fae5;color:#065f46;}.pace-behind{background:#fee2e2;color:#991b1b;}.pace-ok{background:#dbeafe;color:#1e40af;}.pace-na{background:#f1f5f9;color:var(--text3);font-weight:400;}
+    .kpi-mini-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:0 16px 12px;}
+    .kpi-mini{background:var(--card);border-radius:var(--radius);padding:10px;border:1px solid var(--border);}
+    .kpi-mini-val{font-size:20px;font-weight:600;}
+    .kpi-mini-lbl{font-size:11px;color:var(--text2);margin-top:2px;}
+    .kpi-mini-bar{height:4px;background:#f1f5f9;border-radius:2px;margin-top:6px;overflow:hidden;}
+    .kpi-mini-fill{height:4px;border-radius:2px;}
+    .subtabs{display:flex;padding:10px 16px 4px;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;}
+    .subtab{padding:6px 14px;border-radius:20px;font-size:12px;font-weight:500;border:none;cursor:pointer;white-space:nowrap;background:#f1f5f9;color:var(--text2);}
+    .subtab.active{background:var(--navy);color:#fff;}
+    .filter-row{display:flex;padding:4px 16px 8px;gap:6px;align-items:center;flex-wrap:wrap;overflow-x:auto;}
+    .f-btn{padding:5px 12px;border-radius:20px;font-size:11px;border:1px solid #e2e8f0;cursor:pointer;background:var(--card);color:var(--text2);white-space:nowrap;}
+    .f-btn.active{background:var(--navy);color:#fff;border-color:var(--navy);}
+    .toggle-done{margin-left:auto;padding:5px 10px;border-radius:20px;font-size:11px;border:1px solid #e2e8f0;cursor:pointer;background:var(--card);color:var(--text2);}
+    .empty{text-align:center;padding:48px 20px;}
+    .empty-icon{font-size:36px;margin-bottom:10px;}
+    .empty-text{font-size:15px;font-weight:600;color:var(--green);}
+    .form-wrap{padding:16px;}
+    .form-card{background:var(--card);border-radius:var(--radius);border:1px solid var(--border);overflow:hidden;}
+    .form-hd{background:var(--navy);color:#fff;padding:14px 16px;font-size:14px;font-weight:600;display:flex;justify-content:space-between;align-items:center;}
+    .form-body{padding:16px;}
+    .form-group{margin-bottom:14px;}
+    .form-label{font-size:12px;font-weight:600;color:var(--text2);margin-bottom:6px;display:block;}
+    .form-input{width:100%;padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;background:var(--card);color:var(--text1);font-family:inherit;}
+    .form-input:focus{outline:none;border-color:var(--navy);}
+    .seg{display:flex;background:#f1f5f9;border-radius:8px;padding:3px;gap:2px;}
+    .seg-btn{flex:1;padding:7px 4px;border:none;background:none;cursor:pointer;font-size:12px;border-radius:6px;color:var(--text2);}
+    .seg-btn.active{background:var(--card);color:var(--navy);font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,0.08);}
+    .form-hint{background:#f8fafc;border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:var(--text2);line-height:1.6;}
+    .form-actions{display:flex;gap:8px;}
+    .btn-cancel{flex:1;padding:12px;border:1px solid #e2e8f0;border-radius:8px;background:none;color:var(--text2);font-size:13px;cursor:pointer;}
+    .btn-save{flex:2;padding:12px;background:var(--navy);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;}
+    .ai-wrap,.rep-wrap{padding:16px;}
+    .ai-box,.rep-box{background:var(--card);border-radius:var(--radius);padding:16px;border:1px solid var(--border);margin-bottom:12px;}
+    .box-title{font-size:14px;font-weight:600;margin-bottom:8px;}
+    .box-desc{font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.6;}
+    .ai-ta{width:100%;min-height:130px;border:1px solid #e2e8f0;border-radius:8px;padding:10px;font-size:12px;resize:vertical;font-family:inherit;background:var(--card);color:var(--text1);line-height:1.5;}
+    .ai-ta:focus{outline:none;border-color:var(--navy);}
+    .ai-btn{width:100%;padding:12px;background:var(--navy);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;margin-top:8px;}
+    .ai-btn:disabled{background:var(--text3);cursor:not-allowed;}
+    .ai-result{background:#f8fafc;border-radius:8px;padding:12px;margin-top:10px;}
+    .res-label{font-size:11px;font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;}
+    .res-item{font-size:12px;color:var(--text1);padding:5px 0;border-bottom:1px solid var(--border);line-height:1.4;}
+    .res-section{margin-bottom:10px;}
+    .rep-hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;}
+    .copy-btn{padding:7px 14px;background:var(--navy);color:#fff;border:none;border-radius:8px;font-size:12px;cursor:pointer;font-weight:500;}
+    .rep-pre{font-size:11px;color:var(--text2);white-space:pre-wrap;line-height:1.8;background:#f8fafc;padding:14px;border-radius:8px;font-family:'Courier New',monospace;}
+    /* ── 오버레이 공통 ── */
+    .overlay{position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:200;display:flex;align-items:flex-end;justify-content:center;}
+    .overlay-card{background:var(--card);border-radius:16px 16px 0 0;padding:24px 20px 40px;width:100%;max-width:480px;max-height:85vh;overflow-y:auto;}
+    .overlay-title{font-size:16px;font-weight:700;margin-bottom:6px;}
+    .overlay-sub{font-size:13px;color:var(--text2);margin-bottom:20px;}
+    .overlay-confirm{width:100%;padding:14px;background:var(--navy);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;margin-top:16px;}
+    /* ── 다중 사용자 ── */
+    .user-list{display:flex;flex-direction:column;gap:8px;margin-bottom:12px;}
+    .user-item{display:flex;align-items:center;gap:12px;padding:12px;border:2px solid var(--border);border-radius:10px;cursor:pointer;transition:all 0.15s;}
+    .user-item:hover,.user-item.selected{border-color:var(--navy);background:#eff6ff;}
+    .user-avatar{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:#fff;flex-shrink:0;}
+    .user-info{flex:1;}
+    .user-name{font-size:14px;font-weight:600;}
+    .user-role{font-size:11px;color:var(--text2);margin-top:2px;}
+    .user-tasks-preview{font-size:10px;color:var(--text3);margin-top:2px;}
+    .add-user-btn{width:100%;padding:12px;border:2px dashed #e2e8f0;border-radius:10px;background:none;cursor:pointer;font-size:13px;color:var(--text2);display:flex;align-items:center;justify-content:center;gap:6px;}
+    .add-user-btn:hover{border-color:var(--navy);color:var(--navy);}
+    /* 사용자 관리 모드 */
+    .user-mgmt-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;}
+    .user-mgmt-actions{display:flex;gap:6px;margin-left:auto;}
+    .mgmt-btn{padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer;border:1px solid var(--border);background:none;color:var(--text2);}
+    .mgmt-btn.del{color:var(--red);border-color:#fecaca;}
+    /* AI 이력 카드 */
+    .ai-hist-card{background:#f8fafc;border-radius:8px;padding:10px 12px;margin-bottom:8px;border-left:3px solid var(--navy);}
+    .ai-hist-date{font-size:10px;color:var(--text2);margin-bottom:4px;}
+    .ai-hist-summary{font-size:12px;font-weight:500;color:var(--text1);margin-bottom:6px;}
+    .ai-hist-items{font-size:11px;color:var(--text2);line-height:1.6;}
+    .ai-hist-save-btn{width:100%;padding:8px;border:1px solid var(--navy);border-radius:6px;background:none;color:var(--navy);font-size:12px;font-weight:600;cursor:pointer;margin-top:8px;}
+    /* 보고서 섹션 */
+    .rep-section{background:#f8fafc;border-radius:8px;padding:12px;margin-bottom:10px;}
+    .rep-section-title{font-size:12px;font-weight:700;color:var(--navy);margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;}
+    .rep-ai-item{font-size:12px;padding:4px 0;border-bottom:1px solid #e2e8f0;color:var(--text1);}
+    .rep-ai-item:last-child{border-bottom:none;}
+    /* 색상 선택 */
+    .color-picker{display:flex;gap:8px;flex-wrap:wrap;}
+    .color-dot{width:28px;height:28px;border-radius:50%;cursor:pointer;border:3px solid transparent;transition:border-color 0.15s;}
+    .color-dot.selected{border-color:var(--text1);}
+    /* AI 로딩 */
+    .ai-loading-bar{height:3px;background:var(--navy);border-radius:2px;animation:progress 2s infinite;}
+    @keyframes progress{0%{width:0%;opacity:1}100%{width:100%;opacity:0.3}}
+  </style>
+</head>
+<body>
+<div id="app">
+  <div class="hdr">
+    <div class="hdr-brand">
+      <span class="hdr-logo">NEWS</span>
+      <div>
+        <div class="hdr-project" id="hdr-project">안전보건 편집국</div>
+        <div class="hdr-sub" id="hdr-date"></div>
+      </div>
+    </div>
+    <div class="hdr-right">
+      <button class="hdr-user" id="hdr-user" onclick="openUserSelector()">사용자 설정</button>
+      <button class="hdr-add" onclick="openAdd()">+</button>
+    </div>
+  </div>
+  <div id="sync-bar" class="sync-bar syncing">
+    <div class="sync-dot"></div>
+    <span id="sync-text">Firebase 연결 중...</span>
+  </div>
+  <div id="toast" class="toast hidden"></div>
+  <div class="content" id="content"></div>
+  <nav class="bottom-nav" id="bottom-nav"></nav>
+</div>
+
+<!-- 사용자 선택/관리 오버레이 -->
+<div id="user-overlay" class="overlay" style="display:none">
+  <div class="overlay-card" id="user-overlay-content"></div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════
+//  ★ 설정 구역 — 아래 두 값만 수정하면 됩니다
+// ══════════════════════════════════════════════════════
+
+// OpenAI API 키 (https://platform.openai.com/api-keys)
+// OpenAI API 키 — Firebase에 저장, 편집국장만 변경 가능
+// S.apiKey 에 Firebase에서 로드된 값이 들어옴
+function getApiKey(){ return S.apiKey||''; }
+function setApiKey(v){
+  S.apiKey = v||'';
+  dbSet('apiKey', S.apiKey); // Firebase에 저장
+  // 로컬 캐시도 유지 (오프라인 대비)
+  if(v) localStorage.setItem('nr-openai-key', v);
+  else localStorage.removeItem('nr-openai-key');
+}
+
+// Firebase 설정 (Firebase Console → 프로젝트 설정 → 앱)
+const FIREBASE_CONFIG = {
+  apiKey:            "AIzaSyA07qozJinJi_c8e0trQG096KX-pAjMSKo",
+  authDomain:        "newsroom-pr.firebaseapp.com",
+  projectId:         "newsroom-pr",
+  storageBucket:     "newsroom-pr.firebasestorage.app",
+  messagingSenderId: "700066682399",
+  appId:             "1:700066682399:web:5558ac13b7f0d0db8f272a"
+};
+const DB_PATH = { collection: 'newsroom', doc: 'editorial' };
+
+// ══════════════════════════════════════════════════════
+//  기본 사용자 목록 (첫 실행 시 Firebase에 저장됨)
+// ══════════════════════════════════════════════════════
+const DEFAULT_USERS = [
+  { id:'u1', name:'편집국장', role:'편집국장', color:'#1a3a5c', tasks:['편집 총괄','기획기사','후원사','경영'] },
+  { id:'u2', name:'대표',    role:'대표',    color:'#7c3aed', tasks:['후원사 관리','편집국 현황 확인'] },
+  { id:'u3', name:'직원',    role:'직원',    color:'#059669', tasks:['기사 등록','자료 관리','콘텐츠 관리'] },
+];
+const USER_COLORS = ['#1a3a5c','#059669','#d97706','#7c3aed','#dc4a3d','#0891b2','#be185d','#92400e'];
+const ADMIN_ROLES = ['편집국장'];
+const PUBLISHER_ROLES = ['대표']; // 발행인 — 일반+후원사
+function isAdmin(){ const cu=getCurrentUser(); return cu&&ADMIN_ROLES.includes(cu.role); }
+function isPublisher(){ const cu=getCurrentUser(); return cu&&PUBLISHER_ROLES.includes(cu.role); }
+function canEdit(){ return isAdmin(); } // KPI 수정·보고서 편집
+function canAI(){ return true; }        // 전체 가능
+function canAddTask(){ const cu=getCurrentUser(); return !!cu; } // 전체 가능 (카테고리 필터링)
+
+// ══════════════════════════════════════════════════════
+//  고정 데이터
+// ══════════════════════════════════════════════════════
+const DAILY = [
+  { id:'d1', title:'뉴스서치', assignee:'공통' },
+  { id:'d2', title:'보도기사 & 썸네일', assignee:'공통' },
+  { id:'d3', title:'밴드 게시', assignee:'공통' },
+];
+// t = 주간 목표 건수
+const WEEKLY = [
+  { id:'w1',  title:'뉴스레터 편집',         t:1, assignee:'편집국장' },
+  { id:'w2',  title:'기고글 편집 (자문위원)', t:2, assignee:'편집국장' },
+  { id:'w3',  title:'기획기사 작성',          t:1, assignee:'편집국장' },
+  { id:'w4',  title:'편집국 기자 글 편집',    t:1, assignee:'편집국장' },
+  { id:'w5',  title:'대학생기자 글 편집',     t:4, assignee:'편집국장' },
+  { id:'w6',  title:'대학생기자 피드백',      t:4, assignee:'편집국장' },
+  { id:'w7',  title:'사고사례 등록',          t:1, assignee:'직원' },
+  { id:'w8',  title:'후원사 동향 파악',       t:2, assignee:'편집국장' },
+  { id:'w9',  title:'회계정리',              t:1, assignee:'편집국장' },
+  { id:'w10', title:'주간보고',              t:1, assignee:'편집국장' },
+];
+const WEEKLY_TOTAL = WEEKLY.reduce((s,t)=>s+t.t,0); // 18건
+const MONTHLY = [
+  { id:'m1', title:'편집국장 활동 보고',  assignee:'편집국장' },
+  { id:'m2', title:'회계보고',           assignee:'편집국장' },
+  { id:'m3', title:'데이터 현황 보고',   assignee:'직원' },
+  { id:'m4', title:'콘텐츠 통계',        assignee:'직원' },
+  { id:'m5', title:'후원사 이슈 보고',   assignee:'편집국장' },
+];
+const FIXED_EVENTS = [
+  { id:'ev1', title:'신규 대학생기자 교육 (4주)',  due:'2026-01-31', type:'정기모임' },
+  { id:'ev2', title:'대학생기자 정기모임',          due:'2026-05-31', type:'정기모임' },
+  { id:'ev3', title:'대학생기자 정기모임',          due:'2026-07-31', type:'정기모임' },
+  { id:'ev4', title:'대학생기자 정기모임',          due:'2026-10-31', type:'정기모임' },
+  { id:'ev5', title:'대학생기자 수료식',            due:'2026-11-30', type:'수료식' },
+  { id:'ev6', title:'신규 대학생기자 모집',         due:'2026-12-31', type:'모집' },
+];
+const KPI_DEF = [
+  { key:'newsletter',   label:'뉴스레터 편집',      target:48,  unit:'건', wkTarget:1,    moTarget:4  },
+  { key:'contrib',      label:'기고글 편집',         target:96,  unit:'건', wkTarget:2,    moTarget:8  },
+  { key:'feature',      label:'기획기사 작성',       target:48,  unit:'건', wkTarget:1,    moTarget:4  },
+  { key:'staff_edit',   label:'편집국기자 편집',     target:48,  unit:'건', wkTarget:1,    moTarget:4  },
+  { key:'student_edit', label:'대학생기자 편집',     target:192, unit:'건', wkTarget:4,    moTarget:16 },
+  { key:'student_fb',   label:'대학생기자 피드백',   target:192, unit:'건', wkTarget:4,    moTarget:16 },
+  { key:'accident',     label:'사고사례 등록',       target:48,  unit:'건', wkTarget:1,    moTarget:4  },
+  { key:'sponsor',      label:'후원사 동향',         target:96,  unit:'건', wkTarget:2,    moTarget:8  },
+  { key:'weekly_rep',   label:'주간보고',            target:48,  unit:'건', wkTarget:1,    moTarget:4  },
+  { key:'monthly_rep',  label:'월간보고',            target:12,  unit:'건', wkTarget:null, moTarget:1  },
+];
+const KPI_TOTAL_TARGET = KPI_DEF.reduce((s,k)=>s+k.target,0); // 828건
+const EV_KPI  = {};
+const KPI_LABEL = {};
+
+// ══════════════════════════════════════════════════════
+//  날짜 헬퍼
+// ══════════════════════════════════════════════════════
+const TODAY = new Date();
+const YEAR_START = new Date(TODAY.getFullYear(),0,1);
+const YEAR_END   = new Date(TODAY.getFullYear(),11,31);
+const PROJ_TOTAL_WEEKS   = 52;
+const PROJ_ELAPSED_WEEKS = Math.max(0,Math.ceil((TODAY-YEAR_START)/864e5/7));
+const PROJ_RATIO = Math.min(1, PROJ_ELAPSED_WEEKS / PROJ_TOTAL_WEEKS);
+const pad = n => String(n).padStart(2,'0');
+const fmtDate  = (d=new Date()) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const fmtWeek  = (d=new Date()) => { const c=new Date(d),day=c.getDay(),diff=c.getDate()-day+(day===0?-6:1); c.setDate(diff); return 'W'+fmtDate(c); };
+const fmtMonth = (d=new Date()) => `${d.getFullYear()}-${pad(d.getMonth()+1)}`;
+const isWeekday    = (d=new Date()) => d.getDay()!==0&&d.getDay()!==6;
+const isThuOrLater = (d=new Date()) => d.getDay()>=4;
+const isLastWeek   = (d=new Date()) => { const last=new Date(d.getFullYear(),d.getMonth()+1,0).getDate(); return d.getDate()>=last-6; };
+const daysUntil = s => Math.ceil((new Date(s)-TODAY)/864e5);
+
+// ══════════════════════════════════════════════════════
+//  앱 상태
+// ══════════════════════════════════════════════════════
+let S = {
+  tab:'dashboard', clTab:'daily', filter:'all', showDone:false,
+  checks:{}, wCounts:{}, kpi:{}, kpiWeekly:{}, kpiMonthly:{}, eventsDone:{}, evKpiTracked:{},
+  customTasks:[], kpiSubTab:'weekly', addMode:false,
+  addForm:{ title:'', assignee:'직원', type:'event', due:fmtDate(TODAY) },
+  aiText:'', aiResult:null, aiLoading:false, copied:false, showApiSetting:false,
+  apiKey: localStorage.getItem('nr-openai-key')||'', // Firebase 로드 전 로컬 캐시 사용
+  aiHistory:[],
+  users:[],
+  fbReady:false, fbError:false,
+  currentUserId: localStorage.getItem('nr-uid') || '',
+  userOverlayMode:'select',
+  pendingUserId:'',
+  editingUser:null,
+  addUserForm:{ name:'', role:'직원', color:USER_COLORS[2], tasks:'' },
+};
+
+// ══════════════════════════════════════════════════════
+//  Firebase
+// ══════════════════════════════════════════════════════
+let db = null;
+function initFirebase() {
+  if (!FIREBASE_CONFIG.apiKey || FIREBASE_CONFIG.apiKey==='YOUR_API_KEY') {
+    setSyncStatus('offline','Firebase 미설정'); S.fbError=true; render(); return;
+  }
+  try {
+    if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+    db = firebase.firestore();
+    db.collection(DB_PATH.collection).doc(DB_PATH.doc)
+      .onSnapshot({includeMetadataChanges:true}, snap => {
+        if (!snap.exists) {
+          db.collection(DB_PATH.collection).doc(DB_PATH.doc).set({
+            apiKey:'',checks:{},wCounts:{},kpi:{},kpiWeekly:{},kpiMonthly:{},eventsDone:{},evKpiTracked:{},
+            customTasks:[],aiHistory:[],users:DEFAULT_USERS
+          });
+          S.fbReady=true; setSyncStatus('online','동기화 완료'); render(); return;
+        }
+        if (snap.metadata.hasPendingWrites) { setSyncStatus('syncing','저장 중...'); return; }
+        const d = snap.data();
+        S.apiKey       = d.apiKey       || S.apiKey || ''; // Firebase 우선, 없으면 로컬 캐시
+        if(S.apiKey) localStorage.setItem('nr-openai-key', S.apiKey); // 로컬 캐시 갱신
+        S.checks       = d.checks       || {};
+        S.wCounts      = d.wCounts      || {};
+        S.kpi          = d.kpi          || {};
+        S.kpiWeekly    = d.kpiWeekly    || {};
+        S.kpiMonthly   = d.kpiMonthly   || {};
+        S.eventsDone   = d.eventsDone   || {};
+        S.evKpiTracked = d.evKpiTracked || {};
+        S.customTasks  = d.customTasks  || [];
+        S.aiHistory    = d.aiHistory    || [];
+        S.users        = d.users && d.users.length ? d.users : DEFAULT_USERS;
+        S.fbReady=true; setSyncStatus('online','실시간 동기화 중'); render();
+      }, err => { setSyncStatus('offline','연결 오류'); S.fbError=true; render(); });
+  } catch(e) { setSyncStatus('offline','초기화 실패'); S.fbError=true; render(); }
+}
+function dbSet(field, value) {
+  if (!db) return;
+  setSyncStatus('syncing','저장 중...');
+  db.collection(DB_PATH.collection).doc(DB_PATH.doc)
+    .set({[field]:value},{merge:true})
+    .then(()=>setSyncStatus('online','실시간 동기화 중'))
+    .catch(()=>setSyncStatus('offline','저장 실패'));
+}
+function setSyncStatus(cls,msg){
+  const bar=document.getElementById('sync-bar'),txt=document.getElementById('sync-text');
+  if(!bar||!txt) return; bar.className='sync-bar '+cls; txt.textContent=msg;
+}
+
+// ══════════════════════════════════════════════════════
+//  사용자 헬퍼
+// ══════════════════════════════════════════════════════
+function getCurrentUser() {
+  return S.users.find(u=>u.id===S.currentUserId) || null;
+}
+function getUserById(id) { return S.users.find(u=>u.id===id); }
+function getRoleBadgeClass(role) {
+  if (role==='편집국장') return 'b-rep';
+  if (role==='대표')    return 'b-rep';
+  if (role==='직원')    return 'b-staff';
+  return 'b-both';
+}
+function getInitial(name) { return name ? name[0] : '?'; }
+function assigneeMatch(taskAssignee) {
+  if (S.filter==='all') return true;
+  const cu = getCurrentUser();
+  if (!cu) return true;
+  if (isAdmin()) return true; // 편집국장 — 전체
+  if (isPublisher()) {        // 대표(발행인) — 후원사+공통
+    return taskAssignee==='공통'||taskAssignee==='대표'||taskAssignee==='편집국장';
+  }
+  if (taskAssignee === cu.role) return true;
+  if (taskAssignee === '공통') return true;
+  return false;
+}
+
+// ══════════════════════════════════════════════════════
+//  사용자 오버레이
+// ══════════════════════════════════════════════════════
+function openUserSelector() {
+  S.userOverlayMode='select'; S.pendingUserId=''; S.editingUser=null;
+  renderUserOverlay();
+  document.getElementById('user-overlay').style.display='flex';
+}
+function renderUserOverlay() {
+  const c = document.getElementById('user-overlay-content');
+  if (!c) return;
+  if (S.userOverlayMode==='select') c.innerHTML = buildSelectMode();
+  else if (S.userOverlayMode==='manage') c.innerHTML = buildManageMode();
+  else if (S.userOverlayMode==='add' || S.userOverlayMode==='edit') c.innerHTML = buildAddEditMode();
+}
+
+function buildSelectMode() {
+  const usersHtml = S.users.length === 0
+    ? `<div style="text-align:center;padding:24px;color:var(--text3);font-size:13px">등록된 사용자가 없습니다</div>`
+    : S.users.map(u => {
+    const sel = S.pendingUserId===u.id ? ' selected' : (S.currentUserId===u.id&&!S.pendingUserId?' selected':'');
+    const tasks = u.tasks && u.tasks.length ? u.tasks.join(' · ') : '';
+    return `<div class="user-item${sel}" onclick="selectPendingUser('${u.id}')">
+      <div class="user-avatar" style="background:${u.color}">${getInitial(u.name)}</div>
+      <div class="user-info">
+        <div class="user-name">${u.name}</div>
+        <div class="user-role"><span class="badge ${getRoleBadgeClass(u.role)}">${u.role}</span></div>
+        ${tasks?`<div class="user-tasks-preview">${tasks}</div>`:''}
+      </div>
+    </div>`;
+  }).join('');
+  const restoreBtn = S.users.length === 0
+    ? `<button class="add-user-btn" style="color:var(--amber);border-color:var(--amber)" onclick="restoreDefaultUsers()">↺ 기본 사용자 복원</button>` : '';
+  return `
+    <div class="overlay-title">👤 사용자 선택</div>
+    <div class="overlay-sub">본인 계정을 선택하세요. 이 기기에 저장됩니다.</div>
+    <div class="user-list">${usersHtml}</div>
+    ${restoreBtn}
+    <button class="add-user-btn" onclick="openAddUser()">＋ 새 사용자 추가</button>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn-cancel" onclick="closeUserOverlay()">닫기</button>
+      <button class="btn-save" onclick="confirmUserSelect()">확인</button>
+    </div>
+    <button style="margin-top:10px;width:100%;padding:10px;border:none;background:none;color:var(--text3);font-size:12px;cursor:pointer" onclick="S.userOverlayMode='manage';renderUserOverlay()">⚙ 사용자 관리 (추가·수정·삭제)</button>`;
+}
+
+function buildManageMode() {
+  const usersHtml = S.users.map(u=>`
+    <div class="user-mgmt-item">
+      <div class="user-avatar" style="background:${u.color};width:32px;height:32px;font-size:13px">${getInitial(u.name)}</div>
+      <div style="flex:1">
+        <div style="font-size:13px;font-weight:600">${u.name}</div>
+        <div style="font-size:11px;color:var(--text2)">${u.role} ${u.tasks&&u.tasks.length?'· '+u.tasks.join(', '):''}</div>
+      </div>
+      <div class="user-mgmt-actions">
+        <button class="mgmt-btn" onclick="openEditUser('${u.id}')">수정</button>
+        <button class="mgmt-btn del" onclick="deleteUser('${u.id}')">삭제</button>
+      </div>
+    </div>`).join('');
+  return `
+    <div class="overlay-title">⚙ 사용자 관리</div>
+    <div class="overlay-sub">사용자를 추가·수정·삭제합니다.</div>
+    ${usersHtml}
+    <button class="add-user-btn" onclick="openAddUser()">＋ 새 사용자 추가</button>
+    <button class="overlay-confirm" onclick="S.userOverlayMode='select';renderUserOverlay()">← 선택 화면으로</button>`;
+}
+
+function buildAddEditMode() {
+  const isEdit = S.userOverlayMode==='edit';
+  const f = isEdit ? S.editingUser : S.addUserForm;
+  const title = isEdit ? `"${f.name}" 수정` : '새 사용자 추가';
+  const tasksVal = Array.isArray(f.tasks) ? f.tasks.join(', ') : (f.tasks||'');
+  const rolesHtml = ['편집국장','대표','직원','파트너'].map(r=>
+    `<button class="seg-btn${f.role===r?' active':''}" onclick="setUF('role','${r}')">${r}</button>`).join('');
+  const colorsHtml = USER_COLORS.map(c=>
+    `<div class="color-dot${f.color===c?' selected':''}" style="background:${c}" onclick="setUF('color','${c}')"></div>`).join('');
+  return `
+    <div class="overlay-title">${title}</div>
+    <div class="form-group">
+      <label class="form-label">이름 *</label>
+      <input class="form-input" id="uf-name" value="${f.name||''}" placeholder="예: 홍길동"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">역할</label>
+      <div class="seg">${rolesHtml}</div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">담당업무 (쉼표로 구분)</label>
+      <input class="form-input" id="uf-tasks" value="${tasksVal}" placeholder="예: 게시물 관리, DB 업데이트"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">색상</label>
+      <div class="color-picker">${colorsHtml}</div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn-cancel" onclick="S.userOverlayMode='manage';renderUserOverlay()">취소</button>
+      <button class="btn-save" onclick="${isEdit?'saveEditUser()':'saveNewUser()'}">${isEdit?'저장':'추가'}</button>
+    </div>`;
+}
+
+function setUF(field, value) {
+  if (S.userOverlayMode==='edit') {
+    S.editingUser[field] = value;
+  } else {
+    S.addUserForm[field] = value;
+  }
+  // 텍스트 입력 중에는 재렌더링 안 함 (키보드 흔들림 방지)
+  if (field !== 'name' && field !== 'tasks') {
+    renderUserOverlay();
+  }
+}
+
+function selectPendingUser(id) { S.pendingUserId=id; renderUserOverlay(); }
+
+function confirmUserSelect() {
+  const uid = S.pendingUserId || S.currentUserId;
+  if (!uid) { showToast('사용자를 선택해주세요','warn'); return; }
+  S.currentUserId = uid;
+  localStorage.setItem('nr-uid', uid);
+  const cu = getCurrentUser();
+  S.filter = cu ? cu.role : 'all';
+  closeUserOverlay();
+  showToast(`✓ ${cu?cu.name:'사용자'}님으로 로그인됩니다`);
+  render();
+}
+
+function openAddUser() { S.userOverlayMode='add'; S.addUserForm={name:'',role:'직원',color:USER_COLORS[1],tasks:''}; renderUserOverlay(); }
+function openEditUser(id) { S.userOverlayMode='edit'; S.editingUser={...getUserById(id)}; renderUserOverlay(); }
+
+function restoreDefaultUsers() {
+  S.users = [...DEFAULT_USERS];
+  dbSet('users', S.users);
+  showToast('✓ 기본 사용자가 복원됐습니다');
+  renderUserOverlay();
+}
+
+function saveNewUser() {
+  const name = (document.getElementById('uf-name')?.value || '').trim();
+  if (!name) { showToast('이름을 입력해주세요','warn'); return; }
+  const tasksRaw = document.getElementById('uf-tasks')?.value || '';
+  const tasks = tasksRaw.split(',').map(t=>t.trim()).filter(Boolean);
+  const newUser = { id:'u'+Date.now(), name, role:S.addUserForm.role, color:S.addUserForm.color, tasks };
+  S.users.push(newUser);
+  dbSet('users', S.users);
+  showToast(`✓ ${name} 사용자 추가됨`);
+  S.userOverlayMode='manage'; renderUserOverlay();
+}
+
+function saveEditUser() {
+  const name = (document.getElementById('uf-name')?.value || '').trim();
+  if (!name) { showToast('이름을 입력해주세요','warn'); return; }
+  const tasksRaw = document.getElementById('uf-tasks')?.value || '';
+  const tasks = tasksRaw.split(',').map(t=>t.trim()).filter(Boolean);
+  S.users = S.users.map(u => u.id===S.editingUser.id ? {...S.editingUser, name, tasks} : u);
+  dbSet('users', S.users);
+  showToast(`✓ ${name} 정보가 수정됐습니다`);
+  S.userOverlayMode='manage'; renderUserOverlay();
+}
+
+function deleteUser(id) {
+  const u = getUserById(id);
+  if (!u) return;
+  if (!confirm(`"${u.name}" 계정을 삭제할까요?`)) return;
+  S.users = S.users.filter(u=>u.id!==id);
+  if (S.currentUserId===id) { S.currentUserId=''; localStorage.removeItem('nr-uid'); }
+  dbSet('users', S.users);
+  showToast('삭제됐습니다');
+  renderUserOverlay();
+}
+
+function closeUserOverlay() { document.getElementById('user-overlay').style.display='none'; }
+
+// ══════════════════════════════════════════════════════
+//  체크 로직
+// ══════════════════════════════════════════════════════
+const uid = () => S.currentUserId || 'g';
+const dKey = id => `d_${uid()}_${id}_${fmtDate(TODAY)}`;
+const mKey = id => `m_${uid()}_${id}_${fmtMonth(TODAY)}`;
+const wcKey= id => `wc_${uid()}_${id}_${fmtWeek(TODAY)}`;
+function getWTask(id){ return [...WEEKLY,...S.customTasks.filter(t=>t.type==='weekly')].find(t=>t.id===id); }
+function getWCount(id){ return S.wCounts[wcKey(id)]||0; }
+function getWTarget(id){ const t=getWTask(id); return t?(t.t||1):1; }
+function isChecked(type,id){
+  if(type==='daily')   return !!S.checks[dKey(id)];
+  if(type==='weekly')  return getWCount(id)>=getWTarget(id);
+  if(type==='monthly') return !!S.checks[mKey(id)];
+  return !!S.eventsDone[id];
+}
+function toggle(type,id){
+  if(type==='event'){
+    const nowDone=!S.eventsDone[id];
+    S.eventsDone[id]=nowDone;
+    dbSet('eventsDone',S.eventsDone);
+    if(nowDone) showToast('✓ 완료 처리됐습니다');
+    else showToast('↩ 완료 취소됨','warn');
+  } else if(type==='weekly'){
+    const cur=getWCount(id), tgt=getWTarget(id);
+    const nv=cur>=tgt?0:cur+1;
+    S.wCounts[wcKey(id)]=nv;
+    dbSet('wCounts',S.wCounts);
+    if(nv>=tgt) showToast('✓ 완료!');
+  } else {
+    const k=type==='daily'?dKey(id):mKey(id);
+    S.checks[k]=!S.checks[k];
+    dbSet('checks',S.checks);
+    if(S.checks[k]) showToast('✓ 완료');
+  }
+  render();
+}
+function adjW(id,delta){
+  const tgt=getWTarget(id);
+  S.wCounts[wcKey(id)]=Math.max(0,Math.min(tgt,(getWCount(id))+delta));
+  dbSet('wCounts',S.wCounts);
+  if(getWCount(id)>=tgt) showToast('✓ 완료!');
+  render();
+}
+function deleteCustom(id){
+  S.customTasks=S.customTasks.filter(t=>t.id!==id);
+  delete S.eventsDone[id];
+  dbSet('customTasks',S.customTasks); dbSet('eventsDone',S.eventsDone); render();
+}
+
+// ══════════════════════════════════════════════════════
+//  카드 렌더 헬퍼
+// ══════════════════════════════════════════════════════
+function getEvStatus(ev){
+  if(S.eventsDone[ev.id]) return 'done';
+  const d=daysUntil(ev.due);
+  if(d<0) return 'overdue'; if(d<=7) return 'soon'; if(d<=30) return 'upcoming'; return 'future';
+}
+function kpiColor(p){ return p>=100?'#059669':p>=60?'#1a3a5c':p>=30?'#d97706':'#dc4a3d'; }
+
+function taskCard(t,type,isCustom){
+  const done=isChecked(type,t.id);
+  const urgent=!done&&((type==='daily'&&isWeekday(TODAY))||(type==='weekly'&&isThuOrLater(TODAY))||(type==='monthly'&&isLastWeek(TODAY)));
+  if(done&&!S.showDone) return '';
+  if(!assigneeMatch(t.assignee)) return '';
+  const roleCls=ADMIN_ROLES.includes(t.assignee)?'b-rep':t.assignee==='직원'?'b-staff':'b-both';
+  const del=isCustom?`<button class="del-btn" onclick="event.stopPropagation();deleteCustom('${t.id}')">삭제</button>`:'';
+  // 주간 카운트 기반 (t.t > 1)
+  if(type==='weekly'&&t.t&&t.t>1){
+    const cur=getWCount(t.id),tgt=t.t,pct=Math.round(cur/tgt*100);
+    const col=cur>=tgt?'var(--green)':urgent?'var(--amber)':'var(--text3)';
+    const cc='task-card'+(done?' done-c':urgent?' urgent':'');
+    return `<div class="${cc}">
+      <div class="task-body" onclick="toggle('weekly','${t.id}')">
+        <div class="task-title${done?' done-t':''}">${t.title}</div>
+        <div class="task-meta">
+          <span class="badge ${roleCls}">${t.assignee}</span>
+          ${urgent&&!done?'<span class="badge b-urgent">지금 처리</span>':''}
+        </div>
+        <div style="margin-top:6px;display:flex;align-items:center;gap:8px">
+          <div style="flex:1;height:4px;background:#f1f5f9;border-radius:2px;overflow:hidden">
+            <div style="height:4px;border-radius:2px;background:${col};width:${pct}%;transition:width .3s"></div>
+          </div>
+          <span style="font-size:11px;font-weight:700;color:${col}">${cur}/${tgt}</span>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:4px;flex-shrink:0">
+        <button class="step-btn" onclick="event.stopPropagation();adjW('${t.id}',-1)">−</button>
+        <button class="step-btn" onclick="event.stopPropagation();adjW('${t.id}',1)">+</button>
+        ${del}
+      </div>
+    </div>`;
+  }
+  const cc=done?'task-card done-c':isCustom?'task-card custom-t':urgent?'task-card urgent':'task-card';
+  const bc=done?'chk chk-done':isCustom?'chk chk-custom':urgent?'chk chk-urgent':'chk';
+  return `<div class="${cc}" onclick="toggle('${type}','${t.id}')">
+    <div class="${bc}">${done?'<span class="chk-mark">✓</span>':''}</div>
+    <div class="task-body">
+      <div class="task-title${done?' done-t':''}">${t.title}</div>
+      <div class="task-meta">
+        <span class="badge ${roleCls}">${t.assignee}</span>
+        ${isCustom?'<span class="badge b-custom">추가업무</span>':''}
+        ${!done&&urgent&&!isCustom?'<span class="badge b-urgent">지금 처리</span>':''}
+      </div>
+    </div>${del}
+  </div>`;
+}
+
+function eventCard(ev,isCustom){
+  const st=getEvStatus(ev), d=daysUntil(ev.due);
+  const dcolor={overdue:'var(--red)',soon:'var(--amber)',done:'var(--green)',upcoming:'var(--navy)',future:'var(--text3)'}[st];
+  const dtext=st==='done'?'완료':st==='overdue'?`D+${Math.abs(d)}`:`D-${d}`;
+  const kpiKey=EV_KPI[ev.id];
+  const kpiTag=kpiKey&&st!=='done'?`<span class="badge b-kpi">→ ${KPI_LABEL[kpiKey]} KPI 연동</span>`:'';
+  const autoTag=S.evKpiTracked[ev.id]?'<span class="badge b-auto">KPI 반영됨</span>':'';
+  let cc='ev-card';
+  if(st==='overdue') cc+=' ev-overdue'; else if(st==='soon') cc+=' ev-soon'; else if(isCustom&&st!=='done') cc+=' ev-custom';
+  if(st==='done') cc+=' ev-done';
+  const del=isCustom?`<button class="del-btn" onclick="event.stopPropagation();deleteCustom('${ev.id}')">삭제</button>`:'';
+  return `<div class="${cc}" onclick="toggle('event','${ev.id}')">
+    <div class="ev-d" style="color:${dcolor}">${dtext}</div>
+    <div class="ev-info">
+      <div class="ev-title"${st==='done'?' style="text-decoration:line-through;color:var(--text3)"':''}>${ev.title}</div>
+      <div class="ev-meta"><span>${ev.due}</span>${kpiTag}${autoTag}${isCustom?'<span class="badge b-custom">추가</span>':''}</div>
+    </div>${del}
+  </div>`;
+}
+
+// ══════════════════════════════════════════════════════
+//  렌더 — 대시보드
+// ══════════════════════════════════════════════════════
+function getWeekDone(){
+  // 현재 사용자 기준 이번 주 달성 건수
+  return WEEKLY.reduce((s,t)=>s+Math.min(getWCount(t.id),t.t),0);
+}
+function renderWeekRing(pct){
+  const r=28, c=2*Math.PI*r, off=c*(1-pct/100);
+  const col=pct>=80?'#4ade80':pct>=50?'#fbbf24':'#f87171';
+  const d=new Date(TODAY), day=d.getDay(), mon=new Date(d);
+  mon.setDate(d.getDate()-((day+6)%7));
+  const sun=new Date(mon); sun.setDate(mon.getDate()+6);
+  const fmt=dd=>dd.toLocaleDateString('ko-KR',{month:'numeric',day:'numeric'});
+  return `<div style="background:var(--navy);border-radius:var(--radius);padding:16px 18px;margin:12px 16px 0;display:flex;align-items:center;gap:16px;position:relative;overflow:hidden">
+    <div style="position:absolute;right:-15px;top:-15px;width:90px;height:90px;border-radius:50%;background:rgba(255,255,255,.05)"></div>
+    <div style="position:relative;width:68px;height:68px;flex-shrink:0">
+      <svg width="68" height="68" viewBox="0 0 68 68" style="transform:rotate(-90deg)">
+        <circle cx="34" cy="34" r="${r}" fill="none" stroke="rgba(255,255,255,.15)" stroke-width="6"/>
+        <circle cx="34" cy="34" r="${r}" fill="none" stroke="${col}" stroke-width="6" stroke-linecap="round"
+          stroke-dasharray="${c.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}" style="transition:stroke-dashoffset .7s ease"/>
+      </svg>
+      <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#fff">${pct}%</div>
+    </div>
+    <div>
+      <div style="font-size:10px;color:rgba(255,255,255,.6);letter-spacing:.5px;text-transform:uppercase;margin-bottom:4px">이번 주 완성률</div>
+      <div style="font-size:26px;font-weight:700;color:${col};line-height:1;margin-bottom:3px">${pct}%</div>
+      <div style="font-size:11px;color:rgba(255,255,255,.75)">${getWeekDone()} / ${WEEKLY_TOTAL}건 완료</div>
+      <div style="font-size:10px;color:rgba(255,255,255,.4);margin-top:2px">${fmt(mon)} ~ ${fmt(sun)}</div>
+    </div>
+  </div>`;
+}
+function renderAdminOverview(){
+  if(!isAdmin()) return '';
+  const rows=S.users.map(u=>{
+    // 각 사용자별 달성률 계산 (checks에 uid prefix)
+    const savedUid=S.currentUserId;
+    S.currentUserId=u.id; // 임시로 uid 교체해서 isChecked 사용
+    const dDone=DAILY.filter(t=>isChecked('daily',t.id)).length;
+    const wDone=WEEKLY.reduce((s,t)=>s+Math.min(getWCount(t.id),t.t),0);
+    S.currentUserId=savedUid;
+    const dPct=DAILY.length?Math.round(dDone/DAILY.length*100):0;
+    const wPct=WEEKLY_TOTAL?Math.round(wDone/WEEKLY_TOTAL*100):0;
+    const col=dPct>=100?'var(--green)':dPct>=60?'var(--navy)':isWeekday(TODAY)?'var(--red)':'var(--text3)';
+    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--card);border-radius:var(--radius);margin-bottom:6px;border:1px solid var(--border)">
+      <div style="width:32px;height:32px;border-radius:50%;background:${u.color};display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff;flex-shrink:0">${u.name[0]}</div>
+      <div style="flex:1">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+          <span style="font-size:13px;font-weight:600">${u.name}</span>
+          <span style="font-size:11px;font-weight:700;color:${col}">오늘 ${dPct}%</span>
+        </div>
+        <div style="height:4px;background:#f1f5f9;border-radius:2px;overflow:hidden;margin-bottom:3px">
+          <div style="height:4px;border-radius:2px;background:${col};width:${dPct}%;transition:width .4s"></div>
+        </div>
+        <div style="font-size:10px;color:var(--text3)">주간 ${wDone}/${WEEKLY_TOTAL}건 (${wPct}%)</div>
+      </div>
+    </div>`;
+  }).join('');
+  return `<div style="padding:0 16px;margin-top:12px">
+    <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">🛡 관리자 현황</div>
+    ${rows}
+  </div>`;
+}
+function renderDashboard(){
+  const cu = getCurrentUser();
+  const allDaily  =[...DAILY,  ...S.customTasks.filter(t=>t.type==='daily')];
+  const allWeekly =[...WEEKLY, ...S.customTasks.filter(t=>t.type==='weekly')];
+  const allEvs    =[...FIXED_EVENTS,...S.customTasks.filter(t=>t.type==='event'&&t.due)];
+  const todayTasks=allDaily.filter(t=>assigneeMatch(t.assignee));
+  const todayDone =todayTasks.filter(t=>isChecked('daily',t.id)).length;
+  const weekTasks =allWeekly.filter(t=>assigneeMatch(t.assignee));
+  const weekDone  =getWeekDone();
+  const wPct=WEEKLY_TOTAL?Math.round(weekDone/WEEKLY_TOTAL*100):0;
+  const overdueEvs=allEvs.filter(ev=>getEvStatus(ev)==='overdue');
+  const soonEvs   =allEvs.filter(ev=>getEvStatus(ev)==='soon');
+  const totKpi    =KPI_DEF.reduce((s,k)=>s+(S.kpi[k.key]||0),0);
+  const kpiPct    =Math.round(totKpi/KPI_TOTAL_TARGET*100);
+  const unc       =isWeekday(TODAY)?todayTasks.length-todayDone:0;
+
+  const cuBadge = cu ? `<span style="font-size:12px;font-weight:500;color:var(--navy)">👤 ${cu.name} (${cu.role})</span>` : '';
+  const banner = overdueEvs.length>0
+    ?`<div class="banner danger">⚠ 기한 초과 ${overdueEvs.length}건 — 즉시 처리 필요</div>`
+    :unc>0?`<div class="banner warn">! 오늘 미완료 ${unc}건</div>`
+    :`<div class="banner ok">✓ 오늘 할 일 완료</div>`;
+
+  const overdueHtml=overdueEvs.length>0?
+    `<div class="section-hd"><span class="section-title" style="color:var(--red)">기한 초과</span></div>`
+    +overdueEvs.map(ev=>eventCard(ev,!!ev.createdAt)).join(''):'';
+  const soonHtml=soonEvs.length>0?
+    `<div class="section-hd"><span class="section-title" style="color:var(--amber)">7일 이내 마감</span></div>`
+    +soonEvs.map(ev=>eventCard(ev,!!ev.createdAt)).join(''):'';
+  const todayHtml=isWeekday(TODAY)?
+    `<div class="section-hd"><span class="section-title">오늘 할 일</span><span class="section-count">${todayDone}/${todayTasks.length} 완료</span></div>
+     <div class="task-wrap">${allDaily.filter(t=>assigneeMatch(t.assignee)).map(t=>taskCard(t,'daily',!!t.createdAt)).join('')}</div>`:'';
+
+  const kpiMini=KPI_DEF.slice(0,6).map(k=>{
+    const cur=S.kpi[k.key]||0, pct=Math.min(100,Math.round(cur/k.target*100)), col=kpiColor(pct);
+    return `<div class="kpi-mini"><div class="kpi-mini-val" style="color:${col}">${cur}<span style="font-size:11px;color:var(--text2);font-weight:400">/${k.target}</span></div><div class="kpi-mini-lbl">${k.label}</div><div class="kpi-mini-bar"><div class="kpi-mini-fill" style="width:${pct}%;background:${col}"></div></div></div>`;
+  }).join('');
+
+  return `${cuBadge?`<div style="padding:8px 16px 0">${cuBadge}</div>`:''}${banner}
+  ${renderWeekRing(wPct)}
+  <div class="stat-row">
+    <div class="stat-card" onclick="goChecklist('daily')" style="cursor:pointer"><div class="stat-val ${unc>0?'c-red':'c-green'}">${unc}</div><div class="stat-lbl">오늘 미완료</div></div>
+    <div class="stat-card" onclick="goChecklist('weekly')" style="cursor:pointer"><div class="stat-val ${wPct<80&&isThuOrLater(TODAY)?'c-amber':'c-blue'}">${WEEKLY_TOTAL-weekDone}</div><div class="stat-lbl">주간 남은것</div></div>
+    <div class="stat-card" onclick="goChecklist('events')" style="cursor:pointer"><div class="stat-val ${overdueEvs.length>0?'c-red':'c-green'}">${overdueEvs.length}</div><div class="stat-lbl">기한 초과</div></div>
+    <div class="stat-card" onclick="switchTab('kpi')" style="cursor:pointer"><div class="stat-val c-blue">${kpiPct}%</div><div class="stat-lbl">KPI 달성</div></div>
+  </div>
+  ${overdueHtml}${soonHtml}${todayHtml}
+  ${renderAdminOverview()}
+  <div class="section-hd"><span class="section-title">KPI 요약</span><button class="link-btn" onclick="switchTab('kpi')">전체 보기 →</button></div>
+  <div class="kpi-mini-grid">${kpiMini}</div>`;
+}
+
+// ══════════════════════════════════════════════════════
+//  렌더 — 체크리스트
+// ══════════════════════════════════════════════════════
+function renderChecklist(){
+  const tabs=[{id:'daily',l:'오늘'},{id:'weekly',l:'이번 주'},{id:'monthly',l:'이번 달'},{id:'events',l:'이벤트'}];
+  const sub=`<div class="subtabs">${tabs.map(t=>`<button class="subtab${S.clTab===t.id?' active':''}" onclick="switchClTab('${t.id}')">${t.l}</button>`).join('')}</div>`;
+  // 필터: 전체 + 등록된 사용자별
+  const filterBtns = ['all',...S.users.map(u=>u.role)].filter((v,i,a)=>a.indexOf(v)===i);
+  const flt=`<div class="filter-row">
+    ${filterBtns.map(f=>`<button class="f-btn${S.filter===f?' active':''}" onclick="setFilter('${f}')">${f==='all'?'전체':f}</button>`).join('')}
+    <button class="toggle-done" onclick="toggleDone()">${S.showDone?'완료 숨기기':'완료 보기'}</button>
+  </div>`;
+  if(S.clTab==='events'){
+    const allEvs=[...FIXED_EVENTS,...S.customTasks.filter(t=>t.type==='event'&&t.due)].sort((a,b)=>new Date(a.due)-new Date(b.due));
+    return sub+flt
+      +`<div style="padding:6px 16px 4px;font-size:12px;color:var(--text2);line-height:1.5;background:#fffbeb">황색 태그 이벤트 완료 시 KPI 자동 반영</div>`
+      +allEvs.map(ev=>eventCard(ev,!!ev.createdAt)).join('');
+  }
+  const typeMap={daily:DAILY,weekly:WEEKLY,monthly:MONTHLY};
+  const allT=[...(typeMap[S.clTab]||[]),...S.customTasks.filter(t=>t.type===S.clTab)];
+  const fp=t=>assigneeMatch(t.assignee);
+  const undone=allT.filter(t=>!isChecked(S.clTab,t.id)&&fp(t));
+  const done  =allT.filter(t=>isChecked(S.clTab,t.id)&&fp(t));
+  // 주간 진행률 헤더
+  let weekProgress='';
+  if(S.clTab==='weekly'){
+    const wDone=getWeekDone(), wPct=WEEKLY_TOTAL?Math.round(wDone/WEEKLY_TOTAL*100):0;
+    const col=wPct>=80?'var(--green)':wPct>=50?'var(--navy)':'var(--amber)';
+    weekProgress=`<div style="margin:8px 16px;padding:12px;background:var(--card);border-radius:var(--radius);border:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <span style="font-size:12px;font-weight:600;color:var(--text2)">이번 주 진행률</span>
+        <span style="font-size:14px;font-weight:700;color:${col}">${wDone}/${WEEKLY_TOTAL}건 (${wPct}%)</span>
+      </div>
+      <div style="height:6px;background:#f1f5f9;border-radius:3px;overflow:hidden">
+        <div style="height:6px;border-radius:3px;background:${col};width:${wPct}%;transition:width .4s"></div>
+      </div>
+    </div>`;
+  }
+  if(undone.length===0&&(!S.showDone||done.length===0)){
+    return sub+flt+weekProgress+`<div class="empty"><div class="empty-icon">✅</div><div class="empty-text">모두 완료했습니다!</div></div>`;
+  }
+  let body='';
+  if(undone.length) body+=`<div style="padding:8px 16px 4px;font-size:11px;font-weight:600;color:var(--text2)">미완료 ${undone.length}건</div><div class="task-wrap">${undone.map(t=>taskCard(t,S.clTab,!!t.createdAt)).join('')}</div>`;
+  if(S.showDone&&done.length) body+=`<div style="padding:12px 16px 4px;font-size:11px;font-weight:600;color:var(--green)">완료 ${done.length}건</div><div class="task-wrap">${done.map(t=>taskCard(t,S.clTab,!!t.createdAt)).join('')}</div>`;
+  return sub+flt+weekProgress+body;
+}
+
+// ══════════════════════════════════════════════════════
+//  렌더 — KPI (기존과 동일)
+// ══════════════════════════════════════════════════════
+function kpiPaceBadge(cur,expected){
+  if(expected<=0) return '';
+  const r=cur/expected;
+  if(r>=1.1) return '<span class="pace-badge pace-ahead">▲ 목표 초과</span>';
+  if(r>=0.85) return '<span class="pace-badge pace-ok">● 정상 진행</span>';
+  return `<span class="pace-badge pace-behind">▼ ${Math.round(expected-cur)}건 부족</span>`;
+}
+function renderKpi(){
+  const st=S.kpiSubTab||'weekly';
+  const wk=fmtWeek(TODAY), mk=fmtMonth(TODAY);
+  const tot=KPI_DEF.reduce((s,k)=>s+(S.kpi[k.key]||0),0);
+  const pAll=Math.round(tot/KPI_TOTAL_TARGET*100), cAll=kpiColor(pAll);
+  const hero=`<div class="kpi-hero"><div class="kpi-hero-val" style="color:${cAll}">${pAll}%</div><div class="kpi-hero-sub">누적 달성률 — KPI ${tot}/${KPI_TOTAL_TARGET}건 (${PROJ_ELAPSED_WEEKS}주 경과 / 총 ${PROJ_TOTAL_WEEKS}주)</div><div class="kpi-hero-bar"><div class="kpi-hero-fill" style="width:${pAll}%;background:${cAll}"></div></div></div>`;
+  const subTabs=`<div class="kpi-subtabs"><button class="kpi-stab${st==='weekly'?' active':''}" onclick="S.kpiSubTab='weekly';render()">이번 주</button><button class="kpi-stab${st==='monthly'?' active':''}" onclick="S.kpiSubTab='monthly';render()">이번 달</button><button class="kpi-stab${st==='total'?' active':''}" onclick="S.kpiSubTab='total';render()">누적 전체</button></div>`;
+  let cards='';
+  if(st==='weekly'){
+    cards=KPI_DEF.filter(k=>k.wkTarget).map(k=>{
+      const cur=S.kpiWeekly[wk+'_'+k.key]||0, tgt=k.wkTarget, pct=Math.min(100,Math.round(cur/tgt*100)), col=kpiColor(pct);
+      const ctrl=isAdmin()
+        ?`<div class="kpi-ctrl"><button class="step-btn" onclick="adjW('${k.key}',-1)">−</button><input class="kpi-inp" type="number" value="${cur}" min="0" style="color:${col}" onchange="setKW('${k.key}',this.value)" onclick="event.stopPropagation()"/><button class="step-btn" onclick="adjW('${k.key}',1)">+</button><span class="kpi-tgt">/${tgt} ${k.unit}</span></div>`
+        :`<div style="font-size:16px;font-weight:700;color:${col};padding:4px 8px">${cur}<span style="font-size:11px;color:var(--text2)">/${tgt} ${k.unit}</span></div>`;
+      return `<div class="kpi-card"><div class="kpi-row"><div><div class="kpi-lbl">${k.label}</div><div style="margin-top:4px">${cur>=tgt?'<span class="pace-badge pace-ahead">✓ 완료</span>':'<span class="pace-badge pace-behind">미완료</span>'}</div></div>${ctrl}</div><div class="bar-bg"><div class="bar-fill" style="width:${pct}%;background:${col}"></div></div><div class="kpi-pct">${pct}% 달성</div></div>`;
+    }).join('');
+    return hero+subTabs+`<div class="kpi-grid">${cards}</div>`;
+  }
+  if(st==='monthly'){
+    const wp=TODAY.getDate(), dim=new Date(TODAY.getFullYear(),TODAY.getMonth()+1,0).getDate();
+    cards=KPI_DEF.filter(k=>k.moTarget).map(k=>{
+      const cur=S.kpiMonthly[mk+'_'+k.key]||0, tgt=k.moTarget, exp=Math.round(tgt*(wp/dim)), pct=Math.min(100,Math.round(cur/tgt*100)), col=kpiColor(pct);
+      return `<div class="kpi-card"><div class="kpi-row"><div><div class="kpi-lbl">${k.label}</div><div style="margin-top:4px">${kpiPaceBadge(cur,exp)}</div></div><div class="kpi-ctrl"><button class="step-btn" onclick="adjM('${k.key}',-1)">−</button><input class="kpi-inp" type="number" value="${cur}" min="0" style="color:${col}" onchange="setKM('${k.key}',this.value)" onclick="event.stopPropagation()"/><button class="step-btn" onclick="adjM('${k.key}',1)">+</button><span class="kpi-tgt">/${tgt} ${k.unit}</span></div></div><div class="bar-bg"><div class="bar-fill" style="width:${pct}%;background:${col}"></div></div><div class="kpi-pct">${pct}% (이달 예상 목표 ${exp}건)</div></div>`;
+    }).join('');
+    return hero+subTabs+`<div class="kpi-grid">${cards}</div>`;
+  }
+  cards=KPI_DEF.map(k=>{
+    const cur=S.kpi[k.key]||0, exp=Math.round(k.target*PROJ_RATIO), pct=Math.min(100,Math.round(cur/k.target*100)), col=kpiColor(pct);
+    const auto=Object.entries(S.evKpiTracked).filter(([id])=>EV_KPI[id]===k.key).length;
+    return `<div class="kpi-card"><div class="kpi-row"><div><div class="kpi-lbl">${k.label}</div>${auto>0?`<div class="kpi-sub">이벤트 자동반영 ${auto}건</div>`:''}<div style="margin-top:4px">${k.wkTarget?kpiPaceBadge(cur,exp):'<span class="pace-badge pace-na">목표 진도 없음</span>'}</div></div><div class="kpi-ctrl"><button class="step-btn" onclick="adj('${k.key}',-1)">−</button><input class="kpi-inp" type="number" value="${cur}" min="0" style="color:${col}" onchange="setK('${k.key}',this.value)" onclick="event.stopPropagation()"/><button class="step-btn" onclick="adj('${k.key}',1)">+</button><span class="kpi-tgt">/${k.target} ${k.unit}</span></div></div><div class="bar-bg"><div class="bar-fill" style="width:${pct}%;background:${col}"></div></div><div class="kpi-pct">${pct}% (현재 예상 목표 ${exp}${k.unit})</div></div>`;
+  }).join('');
+  return hero+subTabs+`<div class="kpi-grid">${cards}<p style="font-size:11px;color:var(--text3);text-align:center;padding:4px 0">간담회·취재기사는 이벤트 완료 시 자동 반영</p></div>`;
+}
+
+// ══════════════════════════════════════════════════════
+//  렌더 — AI 분석 (API 키 내장, 이력 저장)
+// ══════════════════════════════════════════════════════
+function renderAI(){
+  const noKey = !getApiKey();
+  const apiKey = getApiKey();
+  const masked = apiKey ? 'sk-···'+apiKey.slice(-4) : '';
+  const showSetting = S.showApiSetting || noKey;
+  // 편집국장만 API 키 설정 가능, 나머지는 연결 상태만 표시
+  let apiSettingCard = '';
+  if(isAdmin()){
+    // 편집국장 — 입력·변경·삭제 가능
+    apiSettingCard = `
+    <div style="background:var(--card);border-radius:var(--radius);border:1px solid ${noKey?'var(--red)':'var(--border)'};overflow:hidden;margin-bottom:12px">
+      <div style="background:${noKey?'var(--red)':'var(--navy)'};color:#fff;padding:10px 14px;display:flex;align-items:center;justify-content:space-between">
+        <span style="font-size:13px;font-weight:600">🔑 OpenAI API 키 설정</span>
+        ${!noKey?`<span style="font-size:11px;opacity:.85;cursor:pointer;padding:2px 8px;background:rgba(255,255,255,.15);border-radius:10px" onclick="S.showApiSetting=!S.showApiSetting;render()">${showSetting?'▲ 닫기':'✏ 변경'}</span>`:''}
+      </div>
+      ${showSetting?`
+      <div style="padding:14px">
+        <div style="font-size:11px;color:var(--text2);margin-bottom:10px">
+          <a href="https://platform.openai.com/api-keys" target="_blank" style="color:var(--navy);font-weight:600">platform.openai.com</a>에서 발급 후 입력 — Firebase에 저장되어 모든 구성원이 공유합니다
+        </div>
+        <div style="display:flex;gap:8px">
+          <input id="api-key-input" type="password" placeholder="sk-..."
+            value="${apiKey}"
+            style="flex:1;padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;font-family:monospace;background:#f8fafc;outline:none"/>
+          <button onclick="saveApiKey()" style="padding:10px 18px;background:var(--navy);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap">저장</button>
+        </div>
+        ${apiKey?`<button onclick="clearApiKey()" style="margin-top:8px;width:100%;padding:8px;background:none;border:1px solid #fecaca;border-radius:8px;color:var(--red);font-size:12px;cursor:pointer;font-family:inherit">🗑 API 키 삭제</button>`:''}
+      </div>`
+      :`<div style="padding:11px 14px;display:flex;align-items:center;gap:10px">
+          <span style="font-size:20px">✅</span>
+          <div>
+            <div style="font-size:12px;font-weight:600;color:var(--green)">API 키 연결됨 (Firebase 공유 중)</div>
+            <div style="font-size:11px;color:var(--text3);font-family:monospace;margin-top:1px">${masked}</div>
+          </div>
+        </div>`}
+    </div>`;
+  } else if(noKey){
+    // 일반 사용자 — 키 없음 안내
+    apiSettingCard = `
+    <div style="background:#fff1f2;border:1px solid #fecaca;border-radius:var(--radius);padding:12px 14px;margin-bottom:12px;font-size:12px;color:var(--red);line-height:1.6">
+      ⚠ AI 기능을 사용하려면 편집국장이 API 키를 먼저 설정해야 합니다
+    </div>`;
+  }
+  // 일반 사용자 + 키 있음 → 카드 표시 안 함 (바로 사용)
+  const keyWarn = '';
+
+  const resHtml = S.aiResult ? (S.aiResult.error
+    ?`<div style="color:var(--red);font-size:12px;padding:8px">⚠ ${S.aiResult.error}</div>`
+    :`<div class="ai-result">
+        ${S.aiResult.summary?`<div style="background:#eff6ff;border-radius:8px;padding:10px;margin-bottom:10px;font-size:12px;color:#1e40af;line-height:1.5"><b>요약:</b> ${S.aiResult.summary}</div>`:''}
+        ${S.aiResult.completed?.length?`<div class="res-section"><div class="res-label" style="color:var(--green)">✓ 완료 확인</div>${S.aiResult.completed.map(i=>`<div class="res-item" style="color:var(--text2)">${i}</div>`).join('')}</div>`:''}
+        ${S.aiResult.matched_tasks?.length?`<div class="res-section">
+          <div class="res-label" style="color:var(--navy)">📋 정기업무 해당 (체크리스트에서 완료 처리하세요)</div>
+          ${S.aiResult.matched_tasks.map(i=>`<div class="res-item" style="color:var(--text2)">→ ${i}</div>`).join('')}
+        </div>`:''}
+        ${S.aiResult.extra_tasks?.length?`<div class="res-section">
+          <div class="res-label" style="color:var(--purple)">➕ 기타 추가업무 — 저장 시 체크리스트 자동 추가</div>
+          ${S.aiResult.extra_tasks.map(i=>{
+            const alreadyAdded=S.customTasks.some(t=>t.title===i);
+            return `<div class="res-item" style="color:var(--purple)">• ${i}${alreadyAdded?' <span style="font-size:10px;color:var(--green)">✓이미추가됨</span>':''}</div>`;
+          }).join('')}
+        </div>`:''}
+        ${S.aiResult.events?.length?`<div class="res-section">
+          <div class="res-label" style="color:var(--amber)">📅 일정·이벤트 — 저장 시 이벤트 자동 추가</div>
+          ${S.aiResult.events.map(i=>`<div class="res-item">${i}</div>`).join('')}
+        </div>`:''}
+        <button class="ai-hist-save-btn" onclick="saveAiResult()">📌 저장 + 기타업무·이벤트 체크리스트 자동 추가</button>
+      </div>`) : '';
+
+  // AI 분석 이력
+  const histHtml = S.aiHistory.length>0 ? `
+    <div class="ai-box">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div class="box-title">📋 저장된 AI 분석 이력 (${S.aiHistory.length}건)</div>
+        <button onclick="clearAiHistory()" style="font-size:11px;color:var(--text3);border:none;background:none;cursor:pointer">전체 삭제</button>
+      </div>
+      ${S.aiHistory.slice().reverse().map((h,i)=>`
+        <div class="ai-hist-card">
+          <div class="ai-hist-date">${h.date} · ${h.analyst||'분석자 미상'}</div>
+          <div class="ai-hist-summary">${h.summary||'(요약 없음)'}</div>
+          ${h.extra_tasks?.length?`<div class="ai-hist-items"><b style="color:var(--purple)">기타업무:</b> ${h.extra_tasks.map(a=>`<br>• ${a}`).join('')}</div>`:''}
+          ${h.matched_tasks?.length?`<div class="ai-hist-items"><b style="color:var(--navy)">정기업무:</b> ${h.matched_tasks.map(a=>`<br>→ ${a}`).join('')}</div>`:''}
+          ${h.events?.length?`<div class="ai-hist-items"><b style="color:var(--amber)">이벤트:</b> ${h.events.map(e=>`<br>📅 ${e}`).join('')}</div>`:''}
+          <button onclick="deleteAiHistory(${S.aiHistory.length-1-i})" style="font-size:10px;color:var(--text3);border:none;background:none;cursor:pointer;margin-top:4px">삭제</button>
+        </div>`).join('')}
+    </div>` : '';
+
+  return `<div class="ai-wrap">
+    <div class="ai-box">
+      <div class="box-title">카카오톡 대화 AI 분석</div>
+      <div class="box-desc">대화 내용을 붙여넣으면 완료 업무·할일·추가 이벤트를 추출합니다<br>${noKey?'':'✓ API 키가 설정되어 있습니다. 바로 사용하세요.'}</div>
+      ${keyWarn}
+      ${S.aiLoading?`<div class="ai-loading-bar" style="margin-bottom:10px"></div><div style="text-align:center;font-size:12px;color:var(--text2);padding:8px">AI 분석 중...</div>`:''}
+      <textarea class="ai-ta" id="ai-in" placeholder="카카오톡 대화 내용 붙여넣기...">${S.aiText}</textarea>
+      <button class="ai-btn" onclick="runAI()" ${S.aiLoading||noKey?'disabled':''}>✨ AI 분석 시작</button>
+      ${resHtml}
+    </div>
+    ${histHtml}
+  </div>`;
+}
+
+// AI 실행
+async function runAI(){
+  const el=document.getElementById('ai-in');
+  if(!el||!el.value.trim()){ showToast('대화 내용을 입력해주세요','warn'); return; }
+  if(!getApiKey()){ showToast('설정에서 API 키를 먼저 입력해주세요','err'); S.showApiSetting=true; render(); return; }
+  S.aiText=el.value; S.aiLoading=true; S.aiResult=null; render();
+  try {
+    const FIXED_TASK_LIST = `[매일] 뉴스서치, 보도기사 & 썸네일, 밴드 게시
+[매주] 뉴스레터 편집(1건), 기고글 편집-자문위원(2건), 기획기사 작성(1건), 편집국 기자 글 편집(1건), 대학생기자 글 편집(4건), 대학생기자 피드백(4건), 사고사례 등록(1건), 후원사 동향 파악(2건), 회계정리(1건), 주간보고(1건)
+[매월] 편집국장 활동 보고, 회계보고, 데이터 현황 보고, 콘텐츠 통계, 후원사 이슈 보고, 참여기업 DB 스프레드시트 업데이트, 카페 게시물·회원수 집계, 질의응답 처리 건수 집계, 오픈톡방 활성도 점검`;
+    const res=await fetch("https://api.openai.com/v1/chat/completions",{
+      method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+getApiKey()},
+      body:JSON.stringify({
+        model:"gpt-4o-mini", max_tokens:1200,
+        messages:[
+          {role:"system",content:`당신은 안전보건 인터넷 언론사 편집국의 업무 비서입니다.
+아래 정기업무 목록과 대화 내용을 비교 분석하세요.
+
+[정기업무 목록]
+${FIXED_TASK_LIST}
+
+대화 내용을 분석하여 JSON만 응답 (마크다운 없이):
+{
+  "summary": "한줄 요약 (30자 이내)",
+  "completed": ["완료된 것으로 확인된 업무"],
+  "matched_tasks": ["정기업무 목록에 해당하는 할일 (정기업무 원래 제목으로 표현)"],
+  "extra_tasks": ["정기업무 외 추가 업무만 (핵심만 15자 이내로 간결하게)"],
+  "events": ["일정·행사·마감 (날짜 있으면 포함)"]
+}
+extra_tasks는 정기업무 목록에 없는 새로운 업무만 포함하세요.`},
+          {role:"user",content:"대화 분석:\n\n"+S.aiText}
+        ]
+      })
+    });
+    const data=await res.json();
+    const text=data.choices?.[0]?.message?.content||'{}';
+    S.aiResult=JSON.parse(text.replace(/```json|```/g,'').trim());
+  } catch(e){ S.aiResult={error:'분석 실패: '+e.message}; }
+  S.aiLoading=false; render();
+}
+
+// AI 항목 → 체크리스트/이벤트 직접 추가
+function addAiItemToTask(title, type) {
+  const cu = getCurrentUser();
+  const task = {
+    id:'c'+Date.now(), title, assignee: cu?cu.role:'공통',
+    type, due: type==='event' ? fmtDate(new Date(Date.now()+7*864e5)) : null,
+    createdAt: fmtDate(TODAY), createdBy: cu?cu.name:'AI분석'
+  };
+  S.customTasks.push(task);
+  dbSet('customTasks', S.customTasks);
+  showToast(`✓ "${title.slice(0,15)}..." ${type==='event'?'이벤트':'업무'}에 추가됨`);
+  render();
+}
+
+// AI 항목을 정기업무 vs 기타로 분류
+function classifyActionItems(items) {
+  const allFixed = [...DAILY, ...WEEKLY, ...MONTHLY];
+  // 정기업무 핵심 키워드 추출
+  const fixedKeywords = allFixed.flatMap(t =>
+    t.title.replace(/[()·]/g,' ').split(/\s+/).filter(k => k.length >= 2)
+  );
+  const matched = [];
+  const extra = [];
+  items.forEach(item => {
+    const itemLow = item.toLowerCase();
+    const isFixed = fixedKeywords.some(k => itemLow.includes(k.toLowerCase()));
+    if (isFixed) matched.push(item);
+    else extra.push(item);
+  });
+  return { matched, extra };
+}
+
+// AI 결과 저장
+function saveAiResult(){
+  if(!S.aiResult||S.aiResult.error) return;
+  const cu=getCurrentUser();
+  const extra_tasks = S.aiResult.extra_tasks||[];
+  const events      = S.aiResult.events||[];
+
+  // 기타 업무 → customTasks (daily)에 자동 추가
+  let added=0;
+  extra_tasks.forEach(item=>{
+    if(!S.customTasks.some(t=>t.title===item)){
+      S.customTasks.push({
+        id:'ai'+Date.now()+Math.random().toString(36).slice(2,6),
+        title:item, assignee:cu?cu.role:'공통',
+        type:'daily', due:null,
+        createdAt:fmtDate(TODAY), createdBy:cu?cu.name:'AI분석',
+        fromAI:true
+      });
+      added++;
+    }
+  });
+  // 이벤트 → customTasks (event)에 자동 추가
+  events.forEach(item=>{
+    if(!S.customTasks.some(t=>t.title===item)){
+      S.customTasks.push({
+        id:'aiev'+Date.now()+Math.random().toString(36).slice(2,6),
+        title:item, assignee:cu?cu.role:'공통',
+        type:'event', due:fmtDate(TODAY),
+        createdAt:fmtDate(TODAY), createdBy:cu?cu.name:'AI분석',
+        fromAI:true
+      });
+      added++;
+    }
+  });
+  if(added>0) dbSet('customTasks',S.customTasks);
+
+  // AI 이력 저장
+  const record={
+    id:'ai'+Date.now(), date:fmtDate(TODAY),
+    analyst:cu?cu.name:'미상',
+    summary:S.aiResult.summary||'',
+    completed:S.aiResult.completed||[],
+    matched_tasks:S.aiResult.matched_tasks||[],
+    extra_tasks,
+    events,
+  };
+  S.aiHistory.push(record);
+  dbSet('aiHistory',S.aiHistory);
+  showToast(`📌 저장 완료 — 기타업무 ${added}건 체크리스트에 추가됨`);
+  S.aiResult=null; render();
+}
+function deleteAiHistory(idx){
+  S.aiHistory.splice(idx,1);
+  dbSet('aiHistory',S.aiHistory);
+  render();
+}
+function clearAiHistory(){
+  if(!confirm('AI 분석 이력을 모두 삭제할까요?')) return;
+  S.aiHistory=[];
+  dbSet('aiHistory',S.aiHistory);
+  render();
+}
+
+// ══════════════════════════════════════════════════════
+//  렌더 — 보고서 (강화)
+// ══════════════════════════════════════════════════════
+function renderReport(){
+  const mn=fmtMonth(TODAY);
+  const tot=KPI_DEF.reduce((s,k)=>s+(S.kpi[k.key]||0),0);
+
+  // AI 기타 업무 — customTasks에서 fromAI 항목 완료 여부 확인
+  const aiCustomTasks = S.customTasks.filter(t=>t.fromAI);
+  const aiExtraAll    = [...new Set(S.aiHistory.flatMap(h=>h.extra_tasks||[]))];
+  const allEvents     = [...new Set(S.aiHistory.flatMap(h=>h.events||[]))];
+  const allCompleted  = [...new Set(S.aiHistory.flatMap(h=>h.completed||[]))];
+  const allMatched    = [...new Set(S.aiHistory.flatMap(h=>h.matched_tasks||[]))];
+
+  // 보고서 텍스트 (복사용)
+  const customEvts=S.customTasks.filter(t=>t.type==='event'&&t.due);
+  const monthHistory=S.aiHistory.filter(h=>h.date&&h.date.startsWith(mn));
+
+  const reportTxt = `화성시 산업안전실무자 네트워크 구축 및 운영 용역
+편집국 월간 보고서 (${mn})
+수행기관: SHE컨설팅  |  주관기관: (재)화성산업진흥원
+작성일: ${fmtDate(TODAY)}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. 회원 현황
+   참여기업: ${S.kpi.companies||0}개사 / 목표 20개사
+   카페 가입 회원: ${S.kpi.cafe_members||0}명 / 목표 30명
+
+2. 온라인 채널 운영 현황 (누적)
+   안전보건 뉴스기사: ${S.kpi.news||0}건 / 목표 180건
+   고용노동부 질의회신: ${S.kpi.inquiry||0}건 / 목표 36건
+   안전보건 교육자료: ${S.kpi.education||0}건 / 목표 72건
+   질의응답 정리: ${S.kpi.qna||0}건 / 목표 36건
+   회원 소식: ${S.kpi.member_news||0}건 / 목표 36건
+   월간 소식: ${S.kpi.newsletter||0}건 / 목표 9건
+   누적 KPI 합계: ${tot}건 / 목표 ${KPI_TOTAL_TARGET}건
+
+3. 오프라인 행사
+   간담회: ${S.kpi.seminar||0}회 / 목표 3회
+   취재 기사 게재: ${S.kpi.press||0}회 / 목표 4회
+
+4. 이달 운영 루틴 달성률
+   일일 루틴: ${DAILY.filter(t=>isChecked('daily',t.id)).length}/${DAILY.length}건 완료
+   주간 루틴: ${WEEKLY.filter(t=>isChecked('weekly',t.id)).length}/${WEEKLY.length}건 완료
+   월간 루틴: ${MONTHLY.filter(t=>isChecked('monthly',t.id)).length}/${MONTHLY.length}건 완료
+
+5. 기타 추가업무 현황 (AI 분석 추출)
+${aiExtraAll.length>0?aiExtraAll.map(item=>{
+    const task=aiCustomTasks.find(t=>t.title===item);
+    const done=task?isChecked('daily',task.id):false;
+    return `   ${done?'[완료]':'[미완]'} ${item}`;
+  }).join('\n'):'   없음'}
+
+6. 완료 확인된 업무
+${allCompleted.length>0?allCompleted.map(a=>`   · ${a}`).join('\n'):'   없음'}
+
+7. 특이사항
+   (직접 입력 후 복사)`;
+
+  const monthHistHtml = monthHistory.length>0 ?
+    monthHistory.map(h=>`<div class="rep-ai-item">
+      <b>${h.date}</b> [${h.analyst}] ${h.summary}
+      ${h.extra_tasks?.length?`<br><span style="color:var(--purple)">기타: ${h.extra_tasks.join(', ')}</span>`:''}
+    </div>`).join('')
+    : '<div style="font-size:12px;color:var(--text3)">이번 달 AI 분석 기록 없음</div>';
+
+  // 기타업무 완료 현황 카드
+  const extraStatusHtml = aiExtraAll.length>0 ? `
+    <div class="rep-box">
+      <div class="box-title" style="margin-bottom:12px;color:var(--purple)">➕ 기타 추가업무 현황 (${aiExtraAll.length}건)</div>
+      ${aiExtraAll.map(item=>{
+        const task=aiCustomTasks.find(t=>t.title===item);
+        const done=task?isChecked('daily',task.id):false;
+        return `<div class="rep-ai-item" style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:12px;font-weight:600;color:${done?'var(--green)':'var(--red)'};flex-shrink:0">${done?'✓완료':'미완'}</span>
+          <span style="${done?'text-decoration:line-through;color:var(--text3)':''}">${item}</span>
+        </div>`;
+      }).join('')}
+    </div>` : '';
+
+  return `<div class="rep-wrap">
+    <div class="rep-box">
+      <div class="rep-hd">
+        <div class="box-title">편집국 월간 보고서 (${mn})</div>
+        <button class="copy-btn" onclick="copyRep()">${S.copied?'✓ 복사됨':'복사'}</button>
+      </div>
+      <pre class="rep-pre" id="rep-txt">${reportTxt}</pre>
+    </div>
+    ${extraStatusHtml}
+    <div class="rep-box">
+      <div class="box-title" style="margin-bottom:12px">📋 이달 AI 분석 이력 (${monthHistory.length}건)</div>
+      ${monthHistHtml}
+    </div>
+    ${allEvents.length||customEvts.length?`<div class="rep-box">
+      <div class="box-title" style="margin-bottom:12px;color:var(--amber)">📅 추가 이벤트 현황</div>
+      ${allEvents.map(e=>`<div class="rep-ai-item">📅 ${e}</div>`).join('')}
+      ${customEvts.filter(e=>!e.fromAI).map(e=>`<div class="rep-ai-item">📌 ${e.title} <span style="color:var(--text2)">(${e.due})</span></div>`).join('')}
+    </div>`:''}
+  </div>`;
+}
+
+// ══════════════════════════════════════════════════════
+//  렌더 — 업무 추가 폼
+// ══════════════════════════════════════════════════════
+function renderAddForm(){
+  const f=S.addForm;
+  const types=[{v:'daily',l:'매일'},{v:'weekly',l:'매주'},{v:'monthly',l:'매월'},{v:'event',l:'일회성'}];
+  const hints={daily:'매일 체크리스트에 추가됩니다',weekly:'이번 주 체크리스트에 추가됩니다',monthly:'이번 달 체크리스트에 추가됩니다',event:'이벤트 탭에 추가되며 마감일 기준 D-Day가 표시됩니다'};
+  // 담당자: 사용자 역할 목록
+  const roles=[...new Set(['편집국장','대표','직원','공통',...S.users.map(u=>u.role)])];
+  return `<div class="form-wrap"><div class="form-card">
+    <div class="form-hd">새 업무 추가 <button style="background:none;border:none;color:rgba(255,255,255,0.7);cursor:pointer;font-size:13px" onclick="S.addMode=false;render()">✕</button></div>
+    <div class="form-body">
+      <div class="form-group">
+        <label class="form-label">업무 내용 *</label>
+        <input class="form-input" id="f-title" type="text" placeholder="예: 간담회 장소 확인" value="${f.title}" oninput="S.addForm.title=this.value"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">담당자</label>
+        <div class="seg">${roles.map(a=>`<button class="seg-btn${f.assignee===a?' active':''}" onclick="S.addForm.assignee='${a}';render()">${a}</button>`).join('')}</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">업무 유형</label>
+        <div class="seg">${types.map(t=>`<button class="seg-btn${f.type===t.v?' active':''}" onclick="S.addForm.type='${t.v}';render()">${t.l}</button>`).join('')}</div>
+      </div>
+      ${f.type==='event'?`<div class="form-group"><label class="form-label">마감일</label><input class="form-input" type="date" id="f-due" value="${f.due}" onchange="S.addForm.due=this.value"/></div>`:''}
+      <div class="form-hint">${hints[f.type]||''}</div>
+      <div class="form-actions">
+        <button class="btn-cancel" onclick="S.addMode=false;render()">취소</button>
+        <button class="btn-save" onclick="saveNew()">추가하기</button>
+      </div>
+    </div>
+  </div></div>`;
+}
+function saveNew(){
+  const title=(document.getElementById('f-title')?.value||S.addForm.title).trim();
+  if(!title){showToast('업무 내용을 입력해주세요','warn');return;}
+  const due=document.getElementById('f-due')?.value||S.addForm.due;
+  const cu=getCurrentUser();
+  const task={id:'c'+Date.now(),title,assignee:S.addForm.assignee,type:S.addForm.type,due:S.addForm.type==='event'?due:null,createdAt:fmtDate(TODAY),createdBy:cu?cu.name:''};
+  S.customTasks.push(task); dbSet('customTasks',S.customTasks);
+  S.addMode=false; S.addForm={title:'',assignee:cu?cu.role:'직원',type:'event',due:fmtDate(TODAY)};
+  S.clTab=task.type==='event'?'events':task.type; S.tab='checklist';
+  showToast('✓ 업무가 추가됐습니다'); render();
+}
+
+// ══════════════════════════════════════════════════════
+//  메인 렌더
+// ══════════════════════════════════════════════════════
+const TABS=[
+  {id:'dashboard',icon:'⊞',label:'대시보드'},
+  {id:'checklist',icon:'☑',label:'체크리스트'},
+  {id:'kpi',icon:'◎',label:'KPI'},
+  {id:'ai',icon:'◈',label:'AI분석'},
+  {id:'report',icon:'≡',label:'보고서'},
+];
+function getVisibleTabs(){
+  const tabs=[...TABS];
+  if(isAdmin()) tabs.push({id:'admin',icon:'🛡',label:'관리자'});
+  return tabs;
+}
+// 탭별 접근 권한
+function canAccessTab(tabId){
+  if(isAdmin()) return true;
+  if(tabId==='admin') return false;           // 관리자만
+  if(tabId==='report') return isAdmin();      // 보고서 편집국장만
+  return true;                                 // 나머지 전체
+}
+function renderAdmin(){
+  // 관리자 전용 — 전체 현황 대시보드
+  const rows=S.users.map(u=>{
+    const savedUid=S.currentUserId; S.currentUserId=u.id;
+    const dDone=DAILY.filter(t=>isChecked('daily',t.id)).length;
+    const wDone=WEEKLY.reduce((s,t)=>s+Math.min(getWCount(t.id),t.t),0);
+    const mDone=MONTHLY.filter(t=>isChecked('monthly',t.id)).length;
+    S.currentUserId=savedUid;
+    const dPct=DAILY.length?Math.round(dDone/DAILY.length*100):0;
+    const wPct=WEEKLY_TOTAL?Math.round(wDone/WEEKLY_TOTAL*100):0;
+    const mPct=MONTHLY.length?Math.round(mDone/MONTHLY.length*100):0;
+    const col=dPct>=100?'var(--green)':dPct>=60?'var(--navy)':isWeekday(TODAY)?'var(--red)':'var(--text3)';
+    return `<div style="background:var(--card);border-radius:var(--radius);border:1px solid var(--border);padding:14px;margin-bottom:10px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+        <div style="width:36px;height:36px;border-radius:50%;background:${u.color};display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;color:#fff">${u.name[0]}</div>
+        <div>
+          <div style="font-size:14px;font-weight:600">${u.name}</div>
+          <div style="font-size:11px;color:var(--text2)">${u.role}</div>
+        </div>
+        <div style="margin-left:auto;font-size:18px;font-weight:700;color:${col}">${dPct}%</div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+        ${[['오늘',dDone,DAILY.length,dPct,'var(--red)'],
+           ['주간',wDone,WEEKLY_TOTAL,wPct,'var(--amber)'],
+           ['월간',mDone,MONTHLY.length,mPct,'var(--navy)']].map(([lbl,done,total,pct,baseCol])=>{
+          const c=pct>=100?'var(--green)':pct>=60?baseCol:'var(--red)';
+          return `<div style="text-align:center;padding:8px;background:#f8fafc;border-radius:8px">
+            <div style="font-size:16px;font-weight:700;color:${c}">${pct}%</div>
+            <div style="font-size:10px;color:var(--text2)">${lbl} ${done}/${total}</div>
+            <div style="height:3px;background:#f1f5f9;border-radius:2px;margin-top:5px;overflow:hidden">
+              <div style="height:3px;border-radius:2px;background:${c};width:${pct}%"></div>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }).join('');
+  const kpiCards=KPI_DEF.map(k=>{
+    const cur=S.kpi[k.key]||0, pct=Math.min(100,Math.round(cur/k.target*100)), col=kpiColor(pct);
+    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
+      <div style="flex:1;font-size:12px;font-weight:500">${k.label}</div>
+      <div style="width:80px;height:4px;background:#f1f5f9;border-radius:2px;overflow:hidden">
+        <div style="height:4px;border-radius:2px;background:${col};width:${pct}%"></div>
+      </div>
+      <div style="font-size:11px;font-weight:700;color:${col};min-width:44px;text-align:right">${cur}/${k.target}</div>
+    </div>`;
+  }).join('');
+  return `<div style="padding:16px">
+    <div style="font-size:13px;font-weight:700;color:var(--text1);margin-bottom:12px">📊 구성원별 달성 현황</div>
+    ${rows}
+    <div style="background:var(--card);border-radius:var(--radius);border:1px solid var(--border);padding:14px;margin-top:4px">
+      <div style="font-size:13px;font-weight:700;color:var(--text1);margin-bottom:12px">◎ KPI 전체 현황</div>
+      ${kpiCards}
+    </div>
+  </div>`;
+}
+function render(){
+  const visibleTabs=getVisibleTabs();
+  document.getElementById('bottom-nav').innerHTML=visibleTabs.map(t=>`
+    <button class="nav-btn${S.tab===t.id?' active':''}" onclick="switchTab('${t.id}')">
+      <span class="nav-icon">${t.icon}</span><span>${t.label}</span>
+      ${S.tab===t.id?'<span class="nav-dot"></span>':''}
+    </button>`).join('');
+  document.getElementById('hdr-date').textContent=TODAY.toLocaleDateString('ko-KR',{year:'numeric',month:'long',day:'numeric',weekday:'long'});
+  const cu=getCurrentUser();
+  document.getElementById('hdr-user').textContent=cu?`${cu.name} (${cu.role})`:'사용자 설정';
+  if(S.addMode){document.getElementById('content').innerHTML=renderAddForm();return;}
+  let h='';
+  if(S.tab==='dashboard') h=renderDashboard();
+  else if(S.tab==='checklist') h=renderChecklist();
+  else if(S.tab==='kpi') h=renderKpi();
+  else if(S.tab==='ai') h=renderAI();
+  else if(S.tab==='report') h=renderReport();
+  else if(S.tab==='admin') h=isAdmin()?renderAdmin():'<div style="padding:32px;text-align:center;color:var(--text3)">접근 권한이 없습니다</div>';
+  document.getElementById('content').innerHTML=h;
+}
+
+// ══════════════════════════════════════════════════════
+//  UI 액션
+// ══════════════════════════════════════════════════════
+function switchTab(t){
+  if(!canAccessTab(t)){
+    showToast('접근 권한이 없습니다','warn');
+    return;
+  }
+  S.tab=t;render();
+}
+function switchClTab(t){S.clTab=t;render();}
+function goChecklist(tab){S.tab='checklist';S.clTab=tab;S.showDone=false;render();}
+function setFilter(f){S.filter=f;render();}
+function toggleDone(){S.showDone=!S.showDone;render();}
+function openAdd(){
+  const cu=getCurrentUser();
+  S.addMode=true; S.addForm={title:'',assignee:cu?cu.role:'공통',type:'event',due:fmtDate(TODAY)};render();
+}
+function adj(k,d){S.kpi[k]=Math.max(0,(S.kpi[k]||0)+d);dbSet('kpi',S.kpi);render();}
+function setK(k,v){S.kpi[k]=Math.max(0,parseInt(v)||0);dbSet('kpi',S.kpi);render();}
+function adjW(k,d){const key=fmtWeek(TODAY)+'_'+k;S.kpiWeekly[key]=Math.max(0,(S.kpiWeekly[key]||0)+d);dbSet('kpiWeekly',S.kpiWeekly);render();}
+function setKW(k,v){const key=fmtWeek(TODAY)+'_'+k;S.kpiWeekly[key]=Math.max(0,parseInt(v)||0);dbSet('kpiWeekly',S.kpiWeekly);render();}
+function adjM(k,d){const key=fmtMonth(TODAY)+'_'+k;S.kpiMonthly[key]=Math.max(0,(S.kpiMonthly[key]||0)+d);dbSet('kpiMonthly',S.kpiMonthly);render();}
+function setKM(k,v){const key=fmtMonth(TODAY)+'_'+k;S.kpiMonthly[key]=Math.max(0,parseInt(v)||0);dbSet('kpiMonthly',S.kpiMonthly);render();}
+let toastTimer=null;
+function showToast(msg,cls=''){
+  const el=document.getElementById('toast');
+  if(!el) return;
+  el.textContent=msg; el.className='toast'+(cls?' '+cls:'');
+  if(toastTimer) clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>{el.className='toast hidden';},3000);
+}
+function saveApiKey(){
+  if(!isAdmin()){ showToast('편집국장만 API 키를 설정할 수 있습니다','warn'); return; }
+  const el=document.getElementById('api-key-input');
+  if(!el) return;
+  const val=el.value.trim();
+  if(!val||!val.startsWith('sk-')){ showToast('올바른 API 키를 입력해주세요 (sk-로 시작)','warn'); return; }
+  setApiKey(val);
+  S.showApiSetting=false;
+  showToast('✅ API 키 저장 완료 — 모든 구성원이 바로 사용할 수 있습니다');
+  render();
+}
+function clearApiKey(){
+  if(!isAdmin()){ showToast('편집국장만 API 키를 삭제할 수 있습니다','warn'); return; }
+  if(!confirm('API 키를 삭제하면 모든 구성원의 AI 기능이 중단됩니다. 삭제할까요?')) return;
+  setApiKey('');
+  S.showApiSetting=true;
+  showToast('API 키가 삭제됐습니다','warn');
+  render();
+}
+function copyRep(){
+  const el=document.getElementById('rep-txt');
+  if(el) navigator.clipboard.writeText(el.textContent).then(()=>{S.copied=true;render();setTimeout(()=>{S.copied=false;render();},2000);});
+}
+
+// ══════════════════════════════════════════════════════
+//  앱 시작
+// ══════════════════════════════════════════════════════
+function startApp(){
+  render();   // 빠른 첫 렌더
+  initFirebase();
+  // Firebase 로딩 후 사용자 선택 오버레이
+  setTimeout(()=>{
+    if(!S.currentUserId && S.users.length>0){
+      openUserSelector();
+    }
+  }, 2000);
+}
+if(document.readyState==='loading') window.addEventListener('DOMContentLoaded',startApp);
+else startApp();
+window.addEventListener('offline',()=>setSyncStatus('offline','오프라인 — 연결 복구 후 자동 동기화'));
+window.addEventListener('online', ()=>setSyncStatus('syncing','재연결 중...'));
+</script>
+</body>
+</html>
