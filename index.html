@@ -273,13 +273,13 @@ function canAddTask(){ const cu=getCurrentUser(); return !!cu; } // 전체 가�
 // ══════════════════════════════════════════════════════
 //  고정 데이터
 // ══════════════════════════════════════════════════════
-const DAILY = [
+const DEFAULT_DAILY = [
   { id:'d1', title:'뉴스서치', assignee:'공통' },
   { id:'d2', title:'보도기사 & 썸네일', assignee:'공통' },
   { id:'d3', title:'밴드 게시', assignee:'공통' },
 ];
 // t = 주간 목표 건수
-const WEEKLY = [
+const DEFAULT_WEEKLY = [
   { id:'w1',  title:'뉴스레터 편집',         t:1, assignee:'편집국장' },
   { id:'w2',  title:'기고글 편집 (자문위원)', t:2, assignee:'편집국장' },
   { id:'w3',  title:'기획기사 작성',          t:1, assignee:'편집국장' },
@@ -287,12 +287,13 @@ const WEEKLY = [
   { id:'w5',  title:'대학생기자 글 편집',     t:4, assignee:'편집국장' },
   { id:'w6',  title:'대학생기자 피드백',      t:4, assignee:'편집국장' },
   { id:'w7',  title:'사고사례 등록',          t:1, assignee:'직원' },
-  { id:'w8',  title:'후원사 동향 파악',       t:2, assignee:'편집국장' },
-  { id:'w9',  title:'회계정리',              t:1, assignee:'편집국장' },
-  { id:'w10', title:'주간보고',              t:1, assignee:'편집국장' },
+  { id:'w8',  title:'글로벌 뉴스 게시',       t:1, assignee:'직원' },
+  { id:'w9',  title:'후원사 동향 파악',       t:2, assignee:'편집국장' },
+  { id:'w10', title:'회계정리',              t:1, assignee:'편집국장' },
+  { id:'w11', title:'주간보고',              t:1, assignee:'편집국장' },
 ];
-const WEEKLY_TOTAL = WEEKLY.reduce((s,t)=>s+t.t,0); // 18건
-const MONTHLY = [
+const WEEKLY_TOTAL_BASE = DEFAULT_WEEKLY.reduce((s,t)=>s+t.t,0);
+const DEFAULT_MONTHLY = [
   { id:'m1', title:'편집국장 활동 보고',  assignee:'편집국장' },
   { id:'m2', title:'회계보고',           assignee:'편집국장' },
   { id:'m3', title:'데이터 현황 보고',   assignee:'직원' },
@@ -351,7 +352,7 @@ let S = {
   checks:{}, wCounts:{}, kpi:{}, kpiWeekly:{}, kpiMonthly:{}, eventsDone:{}, evKpiTracked:{},
   customTasks:[], kpiSubTab:'weekly', addMode:false,
   addForm:{ title:'', assignee:'직원', type:'event', due:fmtDate(TODAY) },
-  aiText:'', aiResult:null, aiLoading:false, copied:false, showApiSetting:false, fixedEvents:[], editingEvent:null,
+  aiText:'', aiResult:null, aiLoading:false, copied:false, showApiSetting:false, fixedEvents:[], editingEvent:null, dailyTasks:[], weeklyTasks:[], monthlyTasks:[], taskMgmtTab:'daily',
   apiKey: localStorage.getItem('nr-openai-key')||'', // Firebase 로드 전 로컬 캐시 사용
   aiHistory:[],
   users:[],
@@ -362,6 +363,12 @@ let S = {
   editingUser:null,
   addUserForm:{ name:'', role:'직원', color:USER_COLORS[2], tasks:'' },
 };
+
+// ── 정기업무 getter (S 정의 이후에 위치)
+function getDaily(){ return (S.dailyTasks && S.dailyTasks.length) ? S.dailyTasks : DEFAULT_DAILY; }
+function getWeekly(){ return (S.weeklyTasks && S.weeklyTasks.length) ? S.weeklyTasks : DEFAULT_WEEKLY; }
+function getMonthly(){ return (S.monthlyTasks && S.monthlyTasks.length) ? S.monthlyTasks : DEFAULT_MONTHLY; }
+function getWeeklyTotal(){ return getWeekly().reduce((s,t)=>s+(t.t||1),0); }
 
 // ══════════════════════════════════════════════════════
 //  Firebase
@@ -378,7 +385,7 @@ function initFirebase() {
       .onSnapshot({includeMetadataChanges:true}, snap => {
         if (!snap.exists) {
           db.collection(DB_PATH.collection).doc(DB_PATH.doc).set({
-            apiKey:'',fixedEvents:DEFAULT_FIXED_EVENTS,checks:{},wCounts:{},kpi:{},kpiWeekly:{},kpiMonthly:{},eventsDone:{},evKpiTracked:{},
+            apiKey:'',fixedEvents:DEFAULT_FIXED_EVENTS,dailyTasks:DEFAULT_DAILY,weeklyTasks:DEFAULT_WEEKLY,monthlyTasks:DEFAULT_MONTHLY,checks:{},wCounts:{},kpi:{},kpiWeekly:{},kpiMonthly:{},eventsDone:{},evKpiTracked:{},
             customTasks:[],aiHistory:[],users:DEFAULT_USERS
           });
           S.fbReady=true; setSyncStatus('online','동기화 완료'); render(); return;
@@ -386,6 +393,9 @@ function initFirebase() {
         if (snap.metadata.hasPendingWrites) { setSyncStatus('syncing','저장 중...'); return; }
         const d = snap.data();
         S.apiKey       = d.apiKey       || S.apiKey || '';
+        S.dailyTasks   = d.dailyTasks  && d.dailyTasks.length  ? d.dailyTasks  : DEFAULT_DAILY;
+        S.weeklyTasks  = d.weeklyTasks && d.weeklyTasks.length ? d.weeklyTasks : DEFAULT_WEEKLY;
+        S.monthlyTasks = d.monthlyTasks&& d.monthlyTasks.length? d.monthlyTasks: DEFAULT_MONTHLY;
         S.fixedEvents  = d.fixedEvents  && d.fixedEvents.length ? d.fixedEvents : DEFAULT_FIXED_EVENTS; // Firebase 우선, 없으면 로컬 캐시
         if(S.apiKey) localStorage.setItem('nr-openai-key', S.apiKey); // 로컬 캐시 갱신
         S.checks       = d.checks       || {};
@@ -579,10 +589,22 @@ function saveNewUser() {
   if (!name) { showToast('이름을 입력해주세요','warn'); return; }
   const tasksRaw = document.getElementById('uf-tasks')?.value || '';
   const tasks = tasksRaw.split(',').map(t=>t.trim()).filter(Boolean);
-  const newUser = { id:'u'+Date.now(), name, role:S.addUserForm.role, color:S.addUserForm.color, tasks };
+  const newRole = S.addUserForm.role;
+  const newUser = { id:'u'+Date.now(), name, role:newRole, color:S.addUserForm.color, tasks };
   S.users.push(newUser);
   dbSet('users', S.users);
-  showToast(`✓ ${name} 사용자 추가됨`);
+  // 새 역할이 기존 업무 assignee에 없으면 안내
+  const existingRoles = new Set([
+    ...getDaily().map(t=>t.assignee),
+    ...getWeekly().map(t=>t.assignee),
+    ...getMonthly().map(t=>t.assignee)
+  ]);
+  const isNewRole = !existingRoles.has(newRole);
+  if(isNewRole){
+    showToast(`✓ ${name} 추가됨 — 🛡관리자탭에서 "${newRole}" 업무를 배정해 주세요`,'warn');
+  } else {
+    showToast(`✓ ${name} 추가됨 — "${newRole}" 담당 업무가 자동 배정됩니다`);
+  }
   S.userOverlayMode='manage'; renderUserOverlay();
 }
 
@@ -617,7 +639,7 @@ const uid = () => S.currentUserId || 'g';
 const dKey = id => `d_${uid()}_${id}_${fmtDate(TODAY)}`;
 const mKey = id => `m_${uid()}_${id}_${fmtMonth(TODAY)}`;
 const wcKey= id => `wc_${uid()}_${id}_${fmtWeek(TODAY)}`;
-function getWTask(id){ return [...WEEKLY,...S.customTasks.filter(t=>t.type==='weekly')].find(t=>t.id===id); }
+function getWTask(id){ return [...getWeekly(),...S.customTasks.filter(t=>t.type==='weekly')].find(t=>t.id===id); }
 function getWCount(id){ return S.wCounts[wcKey(id)]||0; }
 function getWTarget(id){ const t=getWTask(id); return t?(t.t||1):1; }
 function isChecked(type,id){
@@ -671,6 +693,8 @@ function getEvStatus(ev){
 function kpiColor(p){ return p>=100?'#059669':p>=60?'#1a3a5c':p>=30?'#d97706':'#dc4a3d'; }
 
 function taskCard(t,type,isCustom){
+  // 비활성화 항목 숨김 (관리자가 비활성화한 항목)
+  if(t.disabled) return '';
   const done=isChecked(type,t.id);
   const urgent=!done&&((type==='daily'&&isWeekday(TODAY))||(type==='weekly'&&isThuOrLater(TODAY))||(type==='monthly'&&isLastWeek(TODAY)));
   if(done&&!S.showDone) return '';
@@ -743,7 +767,7 @@ function eventCard(ev,isCustom){
 // ══════════════════════════════════════════════════════
 function getWeekDone(){
   // 현재 사용자 기준 이번 주 달성 건수
-  return WEEKLY.reduce((s,t)=>s+Math.min(getWCount(t.id),t.t),0);
+  return getWeekly().reduce((s,t)=>s+Math.min(getWCount(t.id),t.t),0);
 }
 function renderWeekRing(pct){
   const r=28, c=2*Math.PI*r, off=c*(1-pct/100);
@@ -765,7 +789,7 @@ function renderWeekRing(pct){
     <div>
       <div style="font-size:10px;color:rgba(255,255,255,.6);letter-spacing:.5px;text-transform:uppercase;margin-bottom:4px">이번 주 완성률</div>
       <div style="font-size:26px;font-weight:700;color:${col};line-height:1;margin-bottom:3px">${pct}%</div>
-      <div style="font-size:11px;color:rgba(255,255,255,.75)">${getWeekDone()} / ${WEEKLY_TOTAL}건 완료</div>
+      <div style="font-size:11px;color:rgba(255,255,255,.75)">${getWeekDone()} / ${getWeeklyTotal()}건 완료</div>
       <div style="font-size:10px;color:rgba(255,255,255,.4);margin-top:2px">${fmt(mon)} ~ ${fmt(sun)}</div>
     </div>
   </div>`;
@@ -776,11 +800,11 @@ function renderAdminOverview(){
     // 각 사용자별 달성률 계산 (checks에 uid prefix)
     const savedUid=S.currentUserId;
     S.currentUserId=u.id; // 임시로 uid 교체해서 isChecked 사용
-    const dDone=DAILY.filter(t=>isChecked('daily',t.id)).length;
-    const wDone=WEEKLY.reduce((s,t)=>s+Math.min(getWCount(t.id),t.t),0);
+    const dDone=getDaily().filter(t=>isChecked('daily',t.id)).length;
+    const wDone=getWeekly().reduce((s,t)=>s+Math.min(getWCount(t.id),t.t),0);
     S.currentUserId=savedUid;
     const dPct=DAILY.length?Math.round(dDone/DAILY.length*100):0;
-    const wPct=WEEKLY_TOTAL?Math.round(wDone/WEEKLY_TOTAL*100):0;
+    const wPct=getWeeklyTotal()?Math.round(wDone/getWeeklyTotal()*100):0;
     const col=dPct>=100?'var(--green)':dPct>=60?'var(--navy)':isWeekday(TODAY)?'var(--red)':'var(--text3)';
     return `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--card);border-radius:var(--radius);margin-bottom:6px;border:1px solid var(--border)">
       <div style="width:32px;height:32px;border-radius:50%;background:${u.color};display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff;flex-shrink:0">${u.name[0]}</div>
@@ -792,7 +816,7 @@ function renderAdminOverview(){
         <div style="height:4px;background:#f1f5f9;border-radius:2px;overflow:hidden;margin-bottom:3px">
           <div style="height:4px;border-radius:2px;background:${col};width:${dPct}%;transition:width .4s"></div>
         </div>
-        <div style="font-size:10px;color:var(--text3)">주간 ${wDone}/${WEEKLY_TOTAL}건 (${wPct}%)</div>
+        <div style="font-size:10px;color:var(--text3)">주간 ${wDone}/${getWeeklyTotal()}건 (${wPct}%)</div>
       </div>
     </div>`;
   }).join('');
@@ -803,14 +827,14 @@ function renderAdminOverview(){
 }
 function renderDashboard(){
   const cu = getCurrentUser();
-  const allDaily  =[...DAILY,  ...S.customTasks.filter(t=>t.type==='daily')];
-  const allWeekly =[...WEEKLY, ...S.customTasks.filter(t=>t.type==='weekly')];
+  const allDaily  =[...getDaily(),  ...S.customTasks.filter(t=>t.type==='daily')];
+  const allWeekly =[...getWeekly(), ...S.customTasks.filter(t=>t.type==='weekly')];
   const allEvs    =[...getFixedEvents(),...S.customTasks.filter(t=>t.type==='event'&&t.due)];
   const todayTasks=allDaily.filter(t=>assigneeMatch(t.assignee));
   const todayDone =todayTasks.filter(t=>isChecked('daily',t.id)).length;
   const weekTasks =allWeekly.filter(t=>assigneeMatch(t.assignee));
   const weekDone  =getWeekDone();
-  const wPct=WEEKLY_TOTAL?Math.round(weekDone/WEEKLY_TOTAL*100):0;
+  const wPct=getWeeklyTotal()?Math.round(weekDone/getWeeklyTotal()*100):0;
   const overdueEvs=allEvs.filter(ev=>getEvStatus(ev)==='overdue');
   const soonEvs   =allEvs.filter(ev=>getEvStatus(ev)==='soon');
   const totKpi    =KPI_DEF.reduce((s,k)=>s+(S.kpi[k.key]||0),0);
@@ -842,7 +866,7 @@ function renderDashboard(){
   ${renderWeekRing(wPct)}
   <div class="stat-row">
     <div class="stat-card" onclick="goChecklist('daily')" style="cursor:pointer"><div class="stat-val ${unc>0?'c-red':'c-green'}">${unc}</div><div class="stat-lbl">오늘 미완료</div></div>
-    <div class="stat-card" onclick="goChecklist('weekly')" style="cursor:pointer"><div class="stat-val ${wPct<80&&isThuOrLater(TODAY)?'c-amber':'c-blue'}">${WEEKLY_TOTAL-weekDone}</div><div class="stat-lbl">주간 남은것</div></div>
+    <div class="stat-card" onclick="goChecklist('weekly')" style="cursor:pointer"><div class="stat-val ${wPct<80&&isThuOrLater(TODAY)?'c-amber':'c-blue'}">${getWeeklyTotal()-weekDone}</div><div class="stat-lbl">주간 남은것</div></div>
     <div class="stat-card" onclick="goChecklist('events')" style="cursor:pointer"><div class="stat-val ${overdueEvs.length>0?'c-red':'c-green'}">${overdueEvs.length}</div><div class="stat-lbl">기한 초과</div></div>
     <div class="stat-card" onclick="switchTab('kpi')" style="cursor:pointer"><div class="stat-val c-blue">${kpiPct}%</div><div class="stat-lbl">KPI 달성</div></div>
   </div>
@@ -870,20 +894,26 @@ function renderChecklist(){
       +`<div style="padding:6px 16px 4px;font-size:12px;color:var(--text2);line-height:1.5;background:#fffbeb">황색 태그 이벤트 완료 시 KPI 자동 반영</div>`
       +allEvs.map(ev=>eventCard(ev,!!ev.createdAt)).join('');
   }
-  const typeMap={daily:DAILY,weekly:WEEKLY,monthly:MONTHLY};
-  const allT=[...(typeMap[S.clTab]||[]),...S.customTasks.filter(t=>t.type===S.clTab)];
-  const fp=t=>assigneeMatch(t.assignee);
+  const typeMap={daily:getDaily(),weekly:getWeekly(),monthly:getMonthly()};
+  const allT=[...(typeMap[S.clTab]||[]),...S.customTasks.filter(t=>t.type===S.clTab)]
+    .filter(t=>!t.disabled); // 비활성화 항목 제외
+  // 필터 적용: 전체면 모두, 특정 역할이면 해당 역할+공통만
+  const fp = t => {
+    if(S.filter==='all') return true;
+    if(t.assignee==='공통') return true;
+    return t.assignee===S.filter;
+  };
   const undone=allT.filter(t=>!isChecked(S.clTab,t.id)&&fp(t));
   const done  =allT.filter(t=>isChecked(S.clTab,t.id)&&fp(t));
   // 주간 진행률 헤더
   let weekProgress='';
   if(S.clTab==='weekly'){
-    const wDone=getWeekDone(), wPct=WEEKLY_TOTAL?Math.round(wDone/WEEKLY_TOTAL*100):0;
+    const wDone=getWeekDone(), wPct=getWeeklyTotal()?Math.round(wDone/getWeeklyTotal()*100):0;
     const col=wPct>=80?'var(--green)':wPct>=50?'var(--navy)':'var(--amber)';
     weekProgress=`<div style="margin:8px 16px;padding:12px;background:var(--card);border-radius:var(--radius);border:1px solid var(--border)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
         <span style="font-size:12px;font-weight:600;color:var(--text2)">이번 주 진행률</span>
-        <span style="font-size:14px;font-weight:700;color:${col}">${wDone}/${WEEKLY_TOTAL}건 (${wPct}%)</span>
+        <span style="font-size:14px;font-weight:700;color:${col}">${wDone}/${getWeeklyTotal()}건 (${wPct}%)</span>
       </div>
       <div style="height:6px;background:#f1f5f9;border-radius:3px;overflow:hidden">
         <div style="height:6px;border-radius:3px;background:${col};width:${wPct}%;transition:width .4s"></div>
@@ -1054,9 +1084,9 @@ async function runAI(){
   if(!getApiKey()){ showToast('설정에서 API 키를 먼저 입력해주세요','err'); S.showApiSetting=true; render(); return; }
   S.aiText=el.value; S.aiLoading=true; S.aiResult=null; render();
   try {
-    const FIXED_TASK_LIST = `[매일] 뉴스서치, 보도기사 & 썸네일, 밴드 게시
-[매주] 뉴스레터 편집(1건), 기고글 편집-자문위원(2건), 기획기사 작성(1건), 편집국 기자 글 편집(1건), 대학생기자 글 편집(4건), 대학생기자 피드백(4건), 사고사례 등록(1건), 후원사 동향 파악(2건), 회계정리(1건), 주간보고(1건)
-[매월] 편집국장 활동 보고, 회계보고, 데이터 현황 보고, 콘텐츠 통계, 후원사 이슈 보고, 참여기업 DB 스프레드시트 업데이트, 카페 게시물·회원수 집계, 질의응답 처리 건수 집계, 오픈톡방 활성도 점검`;
+    const FIXED_TASK_LIST = `[매일] ${getDaily().map(t=>t.title).join(', ')}
+[매주] ${getWeekly().map(t=>t.title+(t.t>1?'('+t.t+'건)':'')).join(', ')}
+[매월] ${getMonthly().map(t=>t.title).join(', ')}`;
     const res=await fetch("https://api.openai.com/v1/chat/completions",{
       method:"POST",
       headers:{"Content-Type":"application/json","Authorization":"Bearer "+getApiKey()},
@@ -1226,9 +1256,9 @@ function renderReport(){
    취재 기사 게재: ${S.kpi.press||0}회 / 목표 4회
 
 4. 이달 운영 루틴 달성률
-   일일 루틴: ${DAILY.filter(t=>isChecked('daily',t.id)).length}/${DAILY.length}건 완료
-   주간 루틴: ${WEEKLY.filter(t=>isChecked('weekly',t.id)).length}/${WEEKLY.length}건 완료
-   월간 루틴: ${MONTHLY.filter(t=>isChecked('monthly',t.id)).length}/${MONTHLY.length}건 완료
+   일일 루틴: ${getDaily().filter(t=>isChecked('daily',t.id)).length}/${DAILY.length}건 완료
+   주간 루틴: ${getWeekly().filter(t=>isChecked('weekly',t.id)).length}/${WEEKLY.length}건 완료
+   월간 루틴: ${getMonthly().filter(t=>isChecked('monthly',t.id)).length}/${MONTHLY.length}건 완료
 
 5. 기타 추가업무 현황 (AI 분석 추출)
 ${aiExtraAll.length>0?aiExtraAll.map(item=>{
@@ -1356,12 +1386,12 @@ function renderAdmin(){
   // 관리자 전용 — 전체 현황 대시보드
   const rows=S.users.map(u=>{
     const savedUid=S.currentUserId; S.currentUserId=u.id;
-    const dDone=DAILY.filter(t=>isChecked('daily',t.id)).length;
-    const wDone=WEEKLY.reduce((s,t)=>s+Math.min(getWCount(t.id),t.t),0);
-    const mDone=MONTHLY.filter(t=>isChecked('monthly',t.id)).length;
+    const dDone=getDaily().filter(t=>isChecked('daily',t.id)).length;
+    const wDone=getWeekly().reduce((s,t)=>s+Math.min(getWCount(t.id),t.t),0);
+    const mDone=getMonthly().filter(t=>isChecked('monthly',t.id)).length;
     S.currentUserId=savedUid;
     const dPct=DAILY.length?Math.round(dDone/DAILY.length*100):0;
-    const wPct=WEEKLY_TOTAL?Math.round(wDone/WEEKLY_TOTAL*100):0;
+    const wPct=getWeeklyTotal()?Math.round(wDone/getWeeklyTotal()*100):0;
     const mPct=MONTHLY.length?Math.round(mDone/MONTHLY.length*100):0;
     const col=dPct>=100?'var(--green)':dPct>=60?'var(--navy)':isWeekday(TODAY)?'var(--red)':'var(--text3)';
     return `<div style="background:var(--card);border-radius:var(--radius);border:1px solid var(--border);padding:14px;margin-bottom:10px">
@@ -1375,7 +1405,7 @@ function renderAdmin(){
       </div>
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
         ${[['오늘',dDone,DAILY.length,dPct,'var(--red)'],
-           ['주간',wDone,WEEKLY_TOTAL,wPct,'var(--amber)'],
+           ['주간',wDone,getWeeklyTotal(),wPct,'var(--amber)'],
            ['월간',mDone,MONTHLY.length,mPct,'var(--navy)']].map(([lbl,done,total,pct,baseCol])=>{
           const c=pct>=100?'var(--green)':pct>=60?baseCol:'var(--red)';
           return `<div style="text-align:center;padding:8px;background:#f8fafc;border-radius:8px">
@@ -1420,6 +1450,21 @@ function renderAdmin(){
       ${kpiCards}
     </div>
     <div style="background:var(--card);border-radius:var(--radius);border:1px solid var(--border);padding:14px;margin-top:10px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="font-size:13px;font-weight:700;color:var(--text1)">📋 정기업무 관리</div>
+        <button onclick="addTaskItem()" style="padding:6px 12px;background:var(--navy);color:#fff;border:none;border-radius:6px;font-size:12px;cursor:pointer;font-family:inherit">+ 추가</button>
+      </div>
+      <div style="display:flex;gap:4px;margin-bottom:10px">
+        ${['daily','weekly','monthly'].map(tab=>`
+          <button onclick="S.taskMgmtTab='${tab}';render()"
+            style="flex:1;padding:7px 4px;border:1px solid ${S.taskMgmtTab===tab?'var(--navy)':'#e2e8f0'};border-radius:6px;background:${S.taskMgmtTab===tab?'var(--navy)':'#f8fafc'};color:${S.taskMgmtTab===tab?'#fff':'var(--text2)'};font-size:11px;font-weight:600;cursor:pointer;font-family:inherit">
+            ${{daily:'매일',weekly:'매주',monthly:'매월'}[tab]}
+          </button>`).join('')}
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:8px">제목·담당자 수정 후 자동 저장 · 주간 목표건수(t) 설정 가능</div>
+      ${renderTaskMgmtList()}
+    </div>
+    <div style="background:var(--card);border-radius:var(--radius);border:1px solid var(--border);padding:14px;margin-top:10px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
         <div style="font-size:13px;font-weight:700;color:var(--text1)">📅 정기 이벤트 관리</div>
         <button onclick="addFixedEvent()" style="padding:6px 12px;background:var(--navy);color:#fff;border:none;border-radius:6px;font-size:12px;cursor:pointer;font-family:inherit">+ 추가</button>
@@ -1462,7 +1507,12 @@ function switchTab(t){
 }
 function switchClTab(t){S.clTab=t;render();}
 function goChecklist(tab){S.tab='checklist';S.clTab=tab;S.showDone=false;render();}
-function setFilter(f){S.filter=f;render();}
+function setFilter(role){
+  S.filter=role;
+  // 체크리스트 탭이 아니면 체크리스트로 이동
+  if(S.tab!=='checklist') S.tab='checklist';
+  render();
+}
 function toggleDone(){S.showDone=!S.showDone;render();}
 function openAdd(){
   const cu=getCurrentUser();
@@ -1481,6 +1531,57 @@ function showToast(msg,cls=''){
   el.textContent=msg; el.className='toast'+(cls?' '+cls:'');
   if(toastTimer) clearTimeout(toastTimer);
   toastTimer=setTimeout(()=>{el.className='toast hidden';},3000);
+}
+// ── 정기업무 관리 헬퍼
+function getTaskList(tab){ return tab==='daily'?getDaily():tab==='weekly'?getWeekly():getMonthly(); }
+function setTaskList(tab, list){
+  if(tab==='daily'){ S.dailyTasks=list; dbSet('dailyTasks',list); }
+  else if(tab==='weekly'){ S.weeklyTasks=list; dbSet('weeklyTasks',list); }
+  else { S.monthlyTasks=list; dbSet('monthlyTasks',list); }
+}
+function renderTaskMgmtList(){
+  const tab=S.taskMgmtTab||'daily';
+  const list=getTaskList(tab);
+  const roles=['공통','편집국장','대표','직원'];
+  return list.map((item,i)=>{
+    const isOn = !item.disabled;
+    return `
+    <div style="display:flex;align-items:center;gap:6px;padding:8px 0;border-bottom:1px solid var(--border);opacity:${isOn?1:0.45}">
+      <button onclick="updateTaskItem('${tab}',${i},'disabled',${isOn})"
+        title="${isOn?'비활성화':'활성화'}"
+        style="width:28px;height:28px;border-radius:6px;border:none;background:${isOn?'var(--green)':'#e2e8f0'};color:#fff;font-size:13px;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center">
+        ${isOn?'✓':'○'}
+      </button>
+      <input value="${item.title}" onchange="updateTaskItem('${tab}',${i},'title',this.value)"
+        style="flex:1;border:1px solid #e2e8f0;border-radius:6px;padding:6px 8px;font-size:12px;font-family:inherit;background:#f8fafc"/>
+      <select onchange="updateTaskItem('${tab}',${i},'assignee',this.value)"
+        style="border:1px solid #e2e8f0;border-radius:6px;padding:5px 4px;font-size:11px;font-family:inherit;background:#f8fafc;flex-shrink:0;max-width:70px">
+        ${roles.map(r=>`<option value="${r}" ${item.assignee===r?'selected':''}>${r}</option>`).join('')}
+      </select>
+      ${tab==='weekly'?`<input type="number" min="1" max="10" value="${item.t||1}" onchange="updateTaskItem('weekly',${i},'t',parseInt(this.value)||1)"
+        style="width:38px;border:1px solid #e2e8f0;border-radius:6px;padding:5px 4px;font-size:12px;text-align:center;font-family:inherit;background:#f8fafc"/>건`:''}
+      <button onclick="removeTaskItem('${tab}',${i})"
+        style="width:26px;height:26px;border:none;background:#fee2e2;color:var(--red);border-radius:6px;cursor:pointer;font-size:13px;flex-shrink:0">×</button>
+    </div>`;}).join('')||'<div style="font-size:12px;color:var(--text3);padding:10px 0">항목이 없습니다</div>';
+}
+function updateTaskItem(tab, idx, field, value){
+  const list=[...getTaskList(tab)];
+  list[idx]={...list[idx],[field]:value};
+  setTaskList(tab,list);
+}
+function removeTaskItem(tab, idx){
+  if(!confirm('이 업무를 삭제할까요?')) return;
+  const list=[...getTaskList(tab)];
+  list.splice(idx,1);
+  setTaskList(tab,list);
+  render();
+}
+function addTaskItem(){
+  const tab=S.taskMgmtTab||'daily';
+  const list=[...getTaskList(tab)];
+  list.push({id:'t'+Date.now(), title:'새 업무', assignee:'공통', t:1});
+  setTaskList(tab,list);
+  render();
 }
 function updateFixedEvent(idx, field, value){
   const evs = [...getFixedEvents()];
