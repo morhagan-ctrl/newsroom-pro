@@ -202,7 +202,7 @@
     <div class="hdr-brand">
       <span class="hdr-logo">NEWS</span>
       <div>
-        <div class="hdr-project" id="hdr-project">안전보건 편집국</div>
+        <div class="hdr-project" id="hdr-project">세닷뉴스 편집국</div>
         <div class="hdr-sub" id="hdr-date"></div>
       </div>
     </div>
@@ -223,6 +223,11 @@
 <!-- 사용자 선택/관리 오버레이 -->
 <div id="user-overlay" class="overlay" style="display:none">
   <div class="overlay-card" id="user-overlay-content"></div>
+</div>
+
+<!-- 관리자 PIN 인증 오버레이 -->
+<div id="pin-overlay" class="overlay" style="display:none;align-items:center">
+  <div class="overlay-card" id="pin-overlay-content" style="border-radius:16px;padding:28px 24px 36px;max-height:95vh"></div>
 </div>
 
 <script>
@@ -353,8 +358,10 @@ let S = {
   customTasks:[], kpiSubTab:'weekly', addMode:false,
   addForm:{ title:'', assignee:'직원', type:'event', due:fmtDate(TODAY) },
   aiText:'', aiResult:null, aiLoading:false, copied:false, showApiSetting:false, fixedEvents:[], editingEvent:null, dailyTasks:[], weeklyTasks:[], monthlyTasks:[], taskMgmtTab:'daily',
-  apiKey: localStorage.getItem('nr-openai-key')||'', // Firebase 로드 전 로컬 캐시 사용
+  apiKey: localStorage.getItem('nr-openai-key')||'',
   aiHistory:[],
+  adminPin:'',
+  pinInput:'', pinError:'', pinAttempts:0, pinPendingUserId:'',
   users:[],
   fbReady:false, fbError:false,
   currentUserId: localStorage.getItem('nr-uid') || '',
@@ -362,6 +369,16 @@ let S = {
   pendingUserId:'',
   editingUser:null,
   addUserForm:{ name:'', role:'직원', color:USER_COLORS[2], tasks:'' },
+  repTab:'weekly',
+  repEmail: localStorage.getItem('nr-rep-email')||'',
+  repMemo: '',
+  repArticles: {editorial:0, student:0, advisor:0, honorary:0},
+  repMailing:  {sent:0, success:0},
+  repHomepage: {visitors:0, pageviews:0},
+  repMembers:  {datnews:0, facebook:0, blog:0},
+  savedReports:[],
+  repCopied: false,
+  showSaved: false,
 };
 
 // ── 정기업무 getter (S 정의 이후에 위치)
@@ -385,14 +402,15 @@ function initFirebase() {
       .onSnapshot({includeMetadataChanges:true}, snap => {
         if (!snap.exists) {
           db.collection(DB_PATH.collection).doc(DB_PATH.doc).set({
-            apiKey:'',fixedEvents:DEFAULT_FIXED_EVENTS,dailyTasks:DEFAULT_DAILY,weeklyTasks:DEFAULT_WEEKLY,monthlyTasks:DEFAULT_MONTHLY,checks:{},wCounts:{},kpi:{},kpiWeekly:{},kpiMonthly:{},eventsDone:{},evKpiTracked:{},
-            customTasks:[],aiHistory:[],users:DEFAULT_USERS
+            apiKey:'',adminPin:'',fixedEvents:DEFAULT_FIXED_EVENTS,dailyTasks:DEFAULT_DAILY,weeklyTasks:DEFAULT_WEEKLY,monthlyTasks:DEFAULT_MONTHLY,checks:{},wCounts:{},kpi:{},kpiWeekly:{},kpiMonthly:{},eventsDone:{},evKpiTracked:{},
+            customTasks:[],aiHistory:[],users:DEFAULT_USERS,savedReports:[]
           });
           S.fbReady=true; setSyncStatus('online','동기화 완료'); render(); return;
         }
         if (snap.metadata.hasPendingWrites) { setSyncStatus('syncing','저장 중...'); return; }
         const d = snap.data();
         S.apiKey       = d.apiKey       || S.apiKey || '';
+        S.adminPin     = d.adminPin     || '';
         S.dailyTasks   = d.dailyTasks  && d.dailyTasks.length  ? d.dailyTasks  : DEFAULT_DAILY;
         S.weeklyTasks  = d.weeklyTasks && d.weeklyTasks.length ? d.weeklyTasks : DEFAULT_WEEKLY;
         S.monthlyTasks = d.monthlyTasks&& d.monthlyTasks.length? d.monthlyTasks: DEFAULT_MONTHLY;
@@ -407,6 +425,7 @@ function initFirebase() {
         S.evKpiTracked = d.evKpiTracked || {};
         S.customTasks  = d.customTasks  || [];
         S.aiHistory    = d.aiHistory    || [];
+        S.savedReports = d.savedReports || [];
         S.users        = d.users && d.users.length ? d.users : DEFAULT_USERS;
         S.fbReady=true; setSyncStatus('online','실시간 동기화 중'); render();
       }, err => { setSyncStatus('offline','연결 오류'); S.fbError=true; render(); });
@@ -451,6 +470,123 @@ function assigneeMatch(taskAssignee) {
 // ══════════════════════════════════════════════════════
 //  사용자 오버레이
 // ══════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════
+//  관리자 PIN 인증
+// ══════════════════════════════════════════════════════
+async function hashPin(pin){
+  try {
+    const data = new TextEncoder().encode('newsroom-admin-' + pin);
+    const buf  = await crypto.subtle.digest('SHA-256', data);
+    return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+  } catch(e){ return 'nohash_'+pin; } // 브라우저 crypto 미지원 폴백
+}
+
+function openPinOverlay(userId){
+  S.pinPendingUserId = userId;
+  S.pinInput = ''; S.pinError = ''; S.pinAttempts = 0;
+  renderPinOverlay();
+  document.getElementById('pin-overlay').style.display = 'flex';
+}
+
+function closePinOverlay(){
+  document.getElementById('pin-overlay').style.display = 'none';
+  S.pinInput = ''; S.pinError = '';
+}
+
+function renderPinOverlay(){
+  const c = document.getElementById('pin-overlay-content');
+  if(!c) return;
+  const u    = getUserById(S.pinPendingUserId);
+  const isFirst = !S.adminPin;
+  const dots = Array.from({length:4},(_,i)=>`
+    <div style="width:16px;height:16px;border-radius:50%;background:${i<S.pinInput.length?'var(--navy)':'#e2e8f0'};transition:background .15s"></div>`).join('');
+  const pad  = [1,2,3,4,5,6,7,8,9,'←',0,'✕'].map(k=>{
+    const isBack = k==='←', isCan = k==='✕';
+    return `<button
+      onclick="${isBack?'pinBackspace()':isCan?'closePinOverlay()':'pinAppend('+k+')'}"
+      style="padding:0;height:58px;border:1px solid ${isCan?'#fecaca':'#e2e8f0'};border-radius:12px;
+             background:${isCan?'#fff1f2':'var(--card)'};font-size:${isBack||isCan?'18px':'22px'};
+             font-weight:600;cursor:pointer;color:${isCan?'var(--red)':'var(--text1)'};
+             -webkit-tap-highlight-color:transparent;transition:background .1s">
+      ${k}
+    </button>`;
+  }).join('');
+  c.innerHTML = `
+    <div style="text-align:center">
+      <div style="font-size:32px;margin-bottom:10px">🔐</div>
+      <div style="font-size:17px;font-weight:700;margin-bottom:6px">관리자 인증</div>
+      <div style="font-size:13px;color:var(--text2);margin-bottom:20px;line-height:1.5">
+        ${isFirst
+          ? '최초 접속입니다. 사용할 <b>PIN 4자리</b>를 설정하세요.<br><span style="font-size:11px;color:var(--text3)">Firebase에 암호화 저장 — 관리자 탭에서 변경 가능</span>'
+          : u ? `<b>${u.name}</b> (${u.role}) 계정은<br>PIN 인증이 필요합니다.` : 'PIN을 입력하세요.'}
+      </div>
+      <div style="display:flex;justify-content:center;gap:14px;margin-bottom:${S.pinError?'8px':'20px'}">${dots}</div>
+      ${S.pinError?`<div style="font-size:12px;color:var(--red);margin-bottom:14px;background:#fff1f2;padding:8px 12px;border-radius:8px">${S.pinError}</div>`:''}
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;max-width:260px;margin:0 auto">${pad}</div>
+    </div>`;
+}
+
+function pinAppend(d){
+  if(S.pinInput.length >= 4) return;
+  S.pinInput += String(d);
+  S.pinError = '';
+  renderPinOverlay();
+  if(S.pinInput.length === 4) setTimeout(verifyPin, 120); // 마지막 dot 표시 후 검증
+}
+
+function pinBackspace(){
+  S.pinInput = S.pinInput.slice(0,-1);
+  S.pinError = '';
+  renderPinOverlay();
+}
+
+async function verifyPin(){
+  const hash = await hashPin(S.pinInput);
+  // 최초 설정: PIN 미등록 상태
+  if(!S.adminPin){
+    S.adminPin = hash;
+    dbSet('adminPin', hash);
+    completePinLogin();
+    showToast('🔐 관리자 PIN이 설정됐습니다. 관리자 탭에서 변경할 수 있습니다.');
+    return;
+  }
+  if(hash === S.adminPin){
+    completePinLogin();
+  } else {
+    S.pinAttempts++;
+    S.pinInput = '';
+    S.pinError = `PIN이 맞지 않습니다 (${S.pinAttempts}회 오류)`;
+    renderPinOverlay();
+  }
+}
+
+function completePinLogin(){
+  S.currentUserId = S.pinPendingUserId;
+  S.pendingUserId  = '';
+  localStorage.setItem('nr-uid', S.currentUserId);
+  const cu = getCurrentUser();
+  // 역할별 기본 필터: 편집국장·대표 = 전체, 직원 = 본인 역할
+  S.filter = (cu && cu.role === '직원') ? '직원' : 'all';
+  closePinOverlay();
+  closeUserOverlay();
+  showToast(`✅ ${cu?cu.name:'관리자'}님으로 로그인됩니다 🛡`);
+  render();
+}
+
+async function changeAdminPin(){
+  if(!isAdmin()){ showToast('관리자만 PIN을 변경할 수 있습니다','warn'); return; }
+  const np = (document.getElementById('pin-new-a')?.value||'').trim();
+  const cp = (document.getElementById('pin-confirm-a')?.value||'').trim();
+  if(!/^\d{4}$/.test(np)){ showToast('4자리 숫자만 입력해주세요','warn'); return; }
+  if(np !== cp){ showToast('PIN이 일치하지 않습니다','warn'); return; }
+  const hash = await hashPin(np);
+  S.adminPin = hash;
+  dbSet('adminPin', hash);
+  document.getElementById('pin-new-a').value = '';
+  document.getElementById('pin-confirm-a').value = '';
+  showToast('✅ 관리자 PIN이 변경됐습니다');
+}
+
 function openUserSelector() {
   S.userOverlayMode='select'; S.pendingUserId=''; S.editingUser=null;
   renderUserOverlay();
@@ -470,11 +606,13 @@ function buildSelectMode() {
     : S.users.map(u => {
     const sel = S.pendingUserId===u.id ? ' selected' : (S.currentUserId===u.id&&!S.pendingUserId?' selected':'');
     const tasks = u.tasks && u.tasks.length ? u.tasks.join(' · ') : '';
+    const isAdminRole = ADMIN_ROLES.includes(u.role);
+    const lockBadge = isAdminRole ? `<span style="font-size:11px;background:#eff6ff;color:var(--navy);padding:2px 7px;border-radius:10px;font-weight:600;margin-left:4px">🔐 PIN</span>` : '';
     return `<div class="user-item${sel}" onclick="selectPendingUser('${u.id}')">
       <div class="user-avatar" style="background:${u.color}">${getInitial(u.name)}</div>
       <div class="user-info">
         <div class="user-name">${u.name}</div>
-        <div class="user-role"><span class="badge ${getRoleBadgeClass(u.role)}">${u.role}</span></div>
+        <div class="user-role"><span class="badge ${getRoleBadgeClass(u.role)}">${u.role}</span>${lockBadge}</div>
         ${tasks?`<div class="user-tasks-preview">${tasks}</div>`:''}
       </div>
     </div>`;
@@ -560,15 +698,33 @@ function setUF(field, value) {
   }
 }
 
-function selectPendingUser(id) { S.pendingUserId=id; renderUserOverlay(); }
+function selectPendingUser(id) {
+  const u = getUserById(id);
+  // 편집국장 역할 + 다른 사람이 선택하는 경우 → PIN 인증
+  if(u && ADMIN_ROLES.includes(u.role) && id !== S.currentUserId){
+    S.pendingUserId = id;
+    renderUserOverlay(); // 선택 하이라이트 반영
+    openPinOverlay(id);
+    return;
+  }
+  S.pendingUserId = id;
+  renderUserOverlay();
+}
 
 function confirmUserSelect() {
   const uid = S.pendingUserId || S.currentUserId;
   if (!uid) { showToast('사용자를 선택해주세요','warn'); return; }
+  // 편집국장 역할을 PIN 없이 직접 확인 버튼으로 시도하는 경우도 차단
+  const u = getUserById(uid);
+  if(u && ADMIN_ROLES.includes(u.role) && uid !== S.currentUserId){
+    openPinOverlay(uid);
+    return;
+  }
   S.currentUserId = uid;
   localStorage.setItem('nr-uid', uid);
   const cu = getCurrentUser();
-  S.filter = 'all'; // 로그인 시 전체 보기로 시작, 필터 버튼으로 변경 가능
+  // 역할별 기본 필터: 편집국장·대표 = 전체, 직원 = 본인 역할
+  S.filter = (cu && cu.role === '직원') ? '직원' : 'all';
   closeUserOverlay();
   showToast(`✓ ${cu?cu.name:'사용자'}님으로 로그인됩니다`);
   render();
@@ -795,7 +951,7 @@ function renderWeekRing(pct){
   </div>`;
 }
 function renderAdminOverview(){
-  if(!isAdmin()) return '';
+  if(!isAdmin() && !isPublisher()) return '';
   const rows=S.users.map(u=>{
     // 각 사용자별 달성률 계산 (checks에 uid prefix)
     const savedUid=S.currentUserId;
@@ -803,7 +959,7 @@ function renderAdminOverview(){
     const dDone=getDaily().filter(t=>isChecked('daily',t.id)).length;
     const wDone=getWeekly().reduce((s,t)=>s+Math.min(getWCount(t.id),t.t),0);
     S.currentUserId=savedUid;
-    const dPct=DAILY.length?Math.round(dDone/DAILY.length*100):0;
+    const dPct=getDaily().length?Math.round(dDone/getDaily().length*100):0;
     const wPct=getWeeklyTotal()?Math.round(wDone/getWeeklyTotal()*100):0;
     const col=dPct>=100?'var(--green)':dPct>=60?'var(--navy)':isWeekday(TODAY)?'var(--red)':'var(--text3)';
     return `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--card);border-radius:var(--radius);margin-bottom:6px;border:1px solid var(--border)">
@@ -830,15 +986,45 @@ function renderDashboard(){
   const allDaily  =[...getDaily(),  ...S.customTasks.filter(t=>t.type==='daily')];
   const allWeekly =[...getWeekly(), ...S.customTasks.filter(t=>t.type==='weekly')];
   const allEvs    =[...getFixedEvents(),...S.customTasks.filter(t=>t.type==='event'&&t.due)];
-  const todayTasks=allDaily.filter(t=>assigneeMatch(t.assignee));
-  const todayDone =todayTasks.filter(t=>isChecked('daily',t.id)).length;
-  const weekTasks =allWeekly.filter(t=>assigneeMatch(t.assignee));
-  const weekDone  =getWeekDone();
-  const wPct=getWeeklyTotal()?Math.round(weekDone/getWeeklyTotal()*100):0;
   const overdueEvs=allEvs.filter(ev=>getEvStatus(ev)==='overdue');
   const soonEvs   =allEvs.filter(ev=>getEvStatus(ev)==='soon');
   const totKpi    =KPI_DEF.reduce((s,k)=>s+(S.kpi[k.key]||0),0);
   const kpiPct    =Math.round(totKpi/KPI_TOTAL_TARGET*100);
+  const weekDone  =getWeekDone();
+  const wPct      =getWeeklyTotal()?Math.round(weekDone/getWeeklyTotal()*100):0;
+
+  // ── 대표 전용: 전체 현황 모니터링 대시보드 ──
+  if(isPublisher()){
+    const kpiMiniAll=KPI_DEF.slice(0,6).map(k=>{
+      const cur=S.kpi[k.key]||0,pct=Math.min(100,Math.round(cur/k.target*100)),col=kpiColor(pct);
+      return `<div class="kpi-mini"><div class="kpi-mini-val" style="color:${col}">${cur}<span style="font-size:11px;color:var(--text2);font-weight:400">/${k.target}</span></div><div class="kpi-mini-lbl">${k.label}</div><div class="kpi-mini-bar"><div class="kpi-mini-fill" style="width:${pct}%;background:${col}"></div></div></div>`;
+    }).join('');
+    const kpiCol=kpiColor(kpiPct);
+    const wCol=wPct>=80?'var(--green)':wPct>=50?'var(--amber)':'var(--red)';
+    return `
+    <div style="padding:8px 16px 0;display:flex;align-items:center;gap:8px">
+      <div style="width:30px;height:30px;border-radius:50%;background:${cu?cu.color:'var(--purple)'};display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff">${cu?cu.name[0]:'?'}</div>
+      <span style="font-size:13px;font-weight:600;color:var(--navy)">${cu?cu.name:''} — 편집국 전체 현황</span>
+    </div>
+    ${overdueEvs.length>0
+      ?`<div class="banner danger">⚠ 기한 초과 ${overdueEvs.length}건 — 즉시 처리 필요</div>`
+      :`<div class="banner ok">✓ 전체 KPI ${kpiPct}% 달성 중 (${totKpi}/${KPI_TOTAL_TARGET}건)</div>`}
+    <div class="stat-row">
+      <div class="stat-card" style="cursor:pointer" onclick="switchTab('kpi')"><div class="stat-val" style="color:${kpiCol}">${kpiPct}%</div><div class="stat-lbl">KPI 달성</div></div>
+      <div class="stat-card" style="cursor:pointer" onclick="switchTab('kpi')"><div class="stat-val" style="color:${wCol}">${wPct}%</div><div class="stat-lbl">주간 달성</div></div>
+      <div class="stat-card" style="cursor:pointer" onclick="goChecklist('events')"><div class="stat-val ${overdueEvs.length>0?'c-red':'c-green'}">${overdueEvs.length}</div><div class="stat-lbl">기한 초과</div></div>
+      <div class="stat-card"><div class="stat-val c-blue">${totKpi}건</div><div class="stat-lbl">누적 KPI</div></div>
+    </div>
+    ${overdueEvs.length>0?`<div class="section-hd"><span class="section-title" style="color:var(--red)">기한 초과 이벤트</span></div>`+overdueEvs.map(ev=>eventCard(ev,!!ev.createdAt)).join(''):''}
+    ${soonEvs.length>0?`<div class="section-hd"><span class="section-title" style="color:var(--amber)">7일 이내 마감</span></div>`+soonEvs.map(ev=>eventCard(ev,!!ev.createdAt)).join(''):''}
+    ${renderAdminOverview()}
+    <div class="section-hd"><span class="section-title">KPI 현황 요약</span><button class="link-btn" onclick="switchTab('kpi')">상세 보기 →</button></div>
+    <div class="kpi-mini-grid">${kpiMiniAll}</div>`;
+  }
+
+  // ── 편집국장 / 직원 공통 대시보드 ──
+  const todayTasks=allDaily.filter(t=>assigneeMatch(t.assignee));
+  const todayDone =todayTasks.filter(t=>isChecked('daily',t.id)).length;
   const unc       =isWeekday(TODAY)?todayTasks.length-todayDone:0;
 
   const cuBadge = cu ? `<span style="font-size:12px;font-weight:500;color:var(--navy)">👤 ${cu.name} (${cu.role})</span>` : '';
@@ -882,8 +1068,11 @@ function renderDashboard(){
 function renderChecklist(){
   const tabs=[{id:'daily',l:'오늘'},{id:'weekly',l:'이번 주'},{id:'monthly',l:'이번 달'},{id:'events',l:'이벤트'}];
   const sub=`<div class="subtabs">${tabs.map(t=>`<button class="subtab${S.clTab===t.id?' active':''}" onclick="switchClTab('${t.id}')">${t.l}</button>`).join('')}</div>`;
-  // 필터: 전체 + 등록된 사용자별
-  const filterBtns = ['all',...S.users.map(u=>u.role)].filter((v,i,a)=>a.indexOf(v)===i);
+  // 편집국장·대표: 전체 필터 버튼 표시 / 직원: 본인+전체만 표시
+  const cu = getCurrentUser();
+  const filterBtns = isAdmin() || isPublisher()
+    ? ['all',...S.users.map(u=>u.role)].filter((v,i,a)=>a.indexOf(v)===i)
+    : ['all', cu?cu.role:'직원'].filter((v,i,a)=>a.indexOf(v)===i);
   const flt=`<div class="filter-row">
     ${filterBtns.map(f=>`<button class="f-btn${S.filter===f?' active':''}" onclick="setFilter('${f}')">${f==='all'?'전체':f}</button>`).join('')}
     <button class="toggle-done" onclick="toggleDone()">${S.showDone?'완료 숨기기':'완료 보기'}</button>
@@ -944,6 +1133,9 @@ function renderKpi(){
   const wk=fmtWeek(TODAY), mk=fmtMonth(TODAY);
   const tot=KPI_DEF.reduce((s,k)=>s+(S.kpi[k.key]||0),0);
   const pAll=Math.round(tot/KPI_TOTAL_TARGET*100), cAll=kpiColor(pAll);
+  const readOnlyBanner = !isAdmin()
+    ? `<div style="padding:8px 16px 0;"><div style="background:#eff6ff;border-radius:8px;padding:8px 12px;font-size:11px;color:var(--navy);display:flex;align-items:center;gap:6px">🔒 KPI 수치는 편집국장만 수정할 수 있습니다 (읽기 전용)</div></div>`
+    : '';
   const hero=`<div class="kpi-hero"><div class="kpi-hero-val" style="color:${cAll}">${pAll}%</div><div class="kpi-hero-sub">누적 달성률 — KPI ${tot}/${KPI_TOTAL_TARGET}건 (${PROJ_ELAPSED_WEEKS}주 경과 / 총 ${PROJ_TOTAL_WEEKS}주)</div><div class="kpi-hero-bar"><div class="kpi-hero-fill" style="width:${pAll}%;background:${cAll}"></div></div></div>`;
   const subTabs=`<div class="kpi-subtabs"><button class="kpi-stab${st==='weekly'?' active':''}" onclick="S.kpiSubTab='weekly';render()">이번 주</button><button class="kpi-stab${st==='monthly'?' active':''}" onclick="S.kpiSubTab='monthly';render()">이번 달</button><button class="kpi-stab${st==='total'?' active':''}" onclick="S.kpiSubTab='total';render()">누적 전체</button></div>`;
   let cards='';
@@ -951,26 +1143,32 @@ function renderKpi(){
     cards=KPI_DEF.filter(k=>k.wkTarget).map(k=>{
       const cur=S.kpiWeekly[wk+'_'+k.key]||0, tgt=k.wkTarget, pct=Math.min(100,Math.round(cur/tgt*100)), col=kpiColor(pct);
       const ctrl=isAdmin()
-        ?`<div class="kpi-ctrl"><button class="step-btn" onclick="adjW('${k.key}',-1)">−</button><input class="kpi-inp" type="number" value="${cur}" min="0" style="color:${col}" onchange="setKW('${k.key}',this.value)" onclick="event.stopPropagation()"/><button class="step-btn" onclick="adjW('${k.key}',1)">+</button><span class="kpi-tgt">/${tgt} ${k.unit}</span></div>`
+        ?`<div class="kpi-ctrl"><button class="step-btn" onclick="adjKpiW('${k.key}',-1)">−</button><input class="kpi-inp" type="number" value="${cur}" min="0" style="color:${col}" onchange="setKW('${k.key}',this.value)" onclick="event.stopPropagation()"/><button class="step-btn" onclick="adjKpiW('${k.key}',1)">+</button><span class="kpi-tgt">/${tgt} ${k.unit}</span></div>`
         :`<div style="font-size:16px;font-weight:700;color:${col};padding:4px 8px">${cur}<span style="font-size:11px;color:var(--text2)">/${tgt} ${k.unit}</span></div>`;
       return `<div class="kpi-card"><div class="kpi-row"><div><div class="kpi-lbl">${k.label}</div><div style="margin-top:4px">${cur>=tgt?'<span class="pace-badge pace-ahead">✓ 완료</span>':'<span class="pace-badge pace-behind">미완료</span>'}</div></div>${ctrl}</div><div class="bar-bg"><div class="bar-fill" style="width:${pct}%;background:${col}"></div></div><div class="kpi-pct">${pct}% 달성</div></div>`;
     }).join('');
-    return hero+subTabs+`<div class="kpi-grid">${cards}</div>`;
+    return readOnlyBanner+hero+subTabs+`<div class="kpi-grid">${cards}</div>`;
   }
   if(st==='monthly'){
     const wp=TODAY.getDate(), dim=new Date(TODAY.getFullYear(),TODAY.getMonth()+1,0).getDate();
     cards=KPI_DEF.filter(k=>k.moTarget).map(k=>{
       const cur=S.kpiMonthly[mk+'_'+k.key]||0, tgt=k.moTarget, exp=Math.round(tgt*(wp/dim)), pct=Math.min(100,Math.round(cur/tgt*100)), col=kpiColor(pct);
-      return `<div class="kpi-card"><div class="kpi-row"><div><div class="kpi-lbl">${k.label}</div><div style="margin-top:4px">${kpiPaceBadge(cur,exp)}</div></div><div class="kpi-ctrl"><button class="step-btn" onclick="adjM('${k.key}',-1)">−</button><input class="kpi-inp" type="number" value="${cur}" min="0" style="color:${col}" onchange="setKM('${k.key}',this.value)" onclick="event.stopPropagation()"/><button class="step-btn" onclick="adjM('${k.key}',1)">+</button><span class="kpi-tgt">/${tgt} ${k.unit}</span></div></div><div class="bar-bg"><div class="bar-fill" style="width:${pct}%;background:${col}"></div></div><div class="kpi-pct">${pct}% (이달 예상 목표 ${exp}건)</div></div>`;
+      const ctrl=isAdmin()
+        ?`<div class="kpi-ctrl"><button class="step-btn" onclick="adjM('${k.key}',-1)">−</button><input class="kpi-inp" type="number" value="${cur}" min="0" style="color:${col}" onchange="setKM('${k.key}',this.value)" onclick="event.stopPropagation()"/><button class="step-btn" onclick="adjM('${k.key}',1)">+</button><span class="kpi-tgt">/${tgt} ${k.unit}</span></div>`
+        :`<div style="font-size:16px;font-weight:700;color:${col};padding:4px 8px">${cur}<span style="font-size:11px;color:var(--text2)">/${tgt} ${k.unit}</span></div>`;
+      return `<div class="kpi-card"><div class="kpi-row"><div><div class="kpi-lbl">${k.label}</div><div style="margin-top:4px">${kpiPaceBadge(cur,exp)}</div></div>${ctrl}</div><div class="bar-bg"><div class="bar-fill" style="width:${pct}%;background:${col}"></div></div><div class="kpi-pct">${pct}% (이달 예상 목표 ${exp}건)</div></div>`;
     }).join('');
-    return hero+subTabs+`<div class="kpi-grid">${cards}</div>`;
+    return readOnlyBanner+hero+subTabs+`<div class="kpi-grid">${cards}</div>`;
   }
   cards=KPI_DEF.map(k=>{
     const cur=S.kpi[k.key]||0, exp=Math.round(k.target*PROJ_RATIO), pct=Math.min(100,Math.round(cur/k.target*100)), col=kpiColor(pct);
     const auto=Object.entries(S.evKpiTracked).filter(([id])=>EV_KPI[id]===k.key).length;
-    return `<div class="kpi-card"><div class="kpi-row"><div><div class="kpi-lbl">${k.label}</div>${auto>0?`<div class="kpi-sub">이벤트 자동반영 ${auto}건</div>`:''}<div style="margin-top:4px">${k.wkTarget?kpiPaceBadge(cur,exp):'<span class="pace-badge pace-na">목표 진도 없음</span>'}</div></div><div class="kpi-ctrl"><button class="step-btn" onclick="adj('${k.key}',-1)">−</button><input class="kpi-inp" type="number" value="${cur}" min="0" style="color:${col}" onchange="setK('${k.key}',this.value)" onclick="event.stopPropagation()"/><button class="step-btn" onclick="adj('${k.key}',1)">+</button><span class="kpi-tgt">/${k.target} ${k.unit}</span></div></div><div class="bar-bg"><div class="bar-fill" style="width:${pct}%;background:${col}"></div></div><div class="kpi-pct">${pct}% (현재 예상 목표 ${exp}${k.unit})</div></div>`;
+    const ctrl=isAdmin()
+      ?`<div class="kpi-ctrl"><button class="step-btn" onclick="adj('${k.key}',-1)">−</button><input class="kpi-inp" type="number" value="${cur}" min="0" style="color:${col}" onchange="setK('${k.key}',this.value)" onclick="event.stopPropagation()"/><button class="step-btn" onclick="adj('${k.key}',1)">+</button><span class="kpi-tgt">/${k.target} ${k.unit}</span></div>`
+      :`<div style="font-size:16px;font-weight:700;color:${col};padding:4px 8px">${cur}<span style="font-size:11px;color:var(--text2)">/${k.target} ${k.unit}</span></div>`;
+    return `<div class="kpi-card"><div class="kpi-row"><div><div class="kpi-lbl">${k.label}</div>${auto>0?`<div class="kpi-sub">이벤트 자동반영 ${auto}건</div>`:''}<div style="margin-top:4px">${k.wkTarget?kpiPaceBadge(cur,exp):'<span class="pace-badge pace-na">목표 진도 없음</span>'}</div></div>${ctrl}</div><div class="bar-bg"><div class="bar-fill" style="width:${pct}%;background:${col}"></div></div><div class="kpi-pct">${pct}% (현재 예상 목표 ${exp}${k.unit})</div></div>`;
   }).join('');
-  return hero+subTabs+`<div class="kpi-grid">${cards}<p style="font-size:11px;color:var(--text3);text-align:center;padding:4px 0">간담회·취재기사는 이벤트 완료 시 자동 반영</p></div>`;
+  return readOnlyBanner+hero+subTabs+`<div class="kpi-grid">${cards}<p style="font-size:11px;color:var(--text3);text-align:center;padding:4px 0">간담회·취재기사는 이벤트 완료 시 자동 반영</p></div>`;
 }
 
 // ══════════════════════════════════════════════════════
@@ -1135,7 +1333,7 @@ function addAiItemToTask(title, type) {
 
 // AI 항목을 정기업무 vs 기타로 분류
 function classifyActionItems(items) {
-  const allFixed = [...DAILY, ...WEEKLY, ...MONTHLY];
+  const allFixed = [...getDaily(), ...getWeekly(), ...getMonthly()];
   // 정기업무 핵심 키워드 추출
   const fixedKeywords = allFixed.flatMap(t =>
     t.title.replace(/[()·]/g,' ').split(/\s+/).filter(k => k.length >= 2)
@@ -1215,103 +1413,520 @@ function clearAiHistory(){
 }
 
 // ══════════════════════════════════════════════════════
-//  렌더 — 보고서 (강화)
+//  보고서 — 헬퍼 함수
 // ══════════════════════════════════════════════════════
-function renderReport(){
-  const mn=fmtMonth(TODAY);
-  const tot=KPI_DEF.reduce((s,k)=>s+(S.kpi[k.key]||0),0);
+function getWeekRange(){
+  const d=new Date(TODAY), day=d.getDay(), diff=day===0?-6:1-day;
+  const mon=new Date(d); mon.setDate(d.getDate()+diff);
+  const sun=new Date(mon); sun.setDate(mon.getDate()+6);
+  const fmt=x=>`${x.getFullYear()}-${pad(x.getMonth()+1)}-${pad(x.getDate())}`;
+  const dayKor=['일','월','화','수','목','금','토'];
+  return { mon, sun,
+    label:`${fmt(mon)}(${dayKor[mon.getDay()]}) ~ ${fmt(sun)}(${dayKor[sun.getDay()]})`,
+    fmtMon: fmt(mon), fmtSun: fmt(sun) };
+}
 
-  // AI 기타 업무 — customTasks에서 fromAI 항목 완료 여부 확인
-  const aiCustomTasks = S.customTasks.filter(t=>t.fromAI);
-  const aiExtraAll    = [...new Set(S.aiHistory.flatMap(h=>h.extra_tasks||[]))];
-  const allEvents     = [...new Set(S.aiHistory.flatMap(h=>h.events||[]))];
-  const allCompleted  = [...new Set(S.aiHistory.flatMap(h=>h.completed||[]))];
-  const allMatched    = [...new Set(S.aiHistory.flatMap(h=>h.matched_tasks||[]))];
+// ASCII 블록 막대 (10칸)
+function asciiBar(pct){
+  const filled=Math.round(pct/10);
+  return '█'.repeat(filled)+'░'.repeat(10-filled);
+}
 
-  // 보고서 텍스트 (복사용)
-  const customEvts=S.customTasks.filter(t=>t.type==='event'&&t.due);
-  const monthHistory=S.aiHistory.filter(h=>h.date&&h.date.startsWith(mn));
+// CSS 인라인 막대차트 (HTML용)
+function htmlBar(pct,col){
+  const c=pct>=100?'var(--green)':pct>=70?col||'var(--navy)':'var(--red)';
+  return `<div style="background:#f1f5f9;border-radius:4px;height:8px;overflow:hidden;margin-top:4px">
+    <div style="height:8px;border-radius:4px;background:${c};width:${Math.min(100,pct)}%;transition:width .4s"></div>
+  </div>`;
+}
 
-  const reportTxt = `화성시 산업안전실무자 네트워크 구축 및 운영 용역
-편집국 월간 보고서 (${mn})
-수행기관: SHE컨설팅  |  주관기관: (재)화성산업진흥원
-작성일: ${fmtDate(TODAY)}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 주간 데이터 내보내기 텍스트 생성
+function buildWeeklyExportText(){
+  const cu=getCurrentUser();
+  const wr=getWeekRange();
+  const wk=fmtWeek(TODAY);
 
-1. 회원 현황
-   참여기업: ${S.kpi.companies||0}개사 / 목표 20개사
-   카페 가입 회원: ${S.kpi.cafe_members||0}명 / 목표 30명
+  // KPI
+  const kpiLines=KPI_DEF.filter(k=>k.wkTarget).map(k=>{
+    const cur=S.kpiWeekly[wk+'_'+k.key]||0;
+    const pct=Math.round(cur/k.wkTarget*100);
+    const label=k.label.padEnd(14,'　');
+    return `${label}  ${asciiBar(pct)}  ${String(cur).padStart(2)}/${k.wkTarget}건 (${String(pct).padStart(3)}%)`;
+  }).join('\n');
 
-2. 온라인 채널 운영 현황 (누적)
-   안전보건 뉴스기사: ${S.kpi.news||0}건 / 목표 180건
-   고용노동부 질의회신: ${S.kpi.inquiry||0}건 / 목표 36건
-   안전보건 교육자료: ${S.kpi.education||0}건 / 목표 72건
-   질의응답 정리: ${S.kpi.qna||0}건 / 목표 36건
-   회원 소식: ${S.kpi.member_news||0}건 / 목표 36건
-   월간 소식: ${S.kpi.newsletter||0}건 / 목표 9건
-   누적 KPI 합계: ${tot}건 / 목표 ${KPI_TOTAL_TARGET}건
+  // 체크리스트
+  const dAll=getDaily().filter(t=>assigneeMatch(t.assignee));
+  const dDone=dAll.filter(t=>isChecked('daily',t.id)).length;
+  const wDone=getWeekDone(), wTotal=getWeeklyTotal();
+  const mAll=getMonthly().filter(t=>assigneeMatch(t.assignee));
+  const mDone=mAll.filter(t=>isChecked('monthly',t.id)).length;
 
-3. 오프라인 행사
-   간담회: ${S.kpi.seminar||0}회 / 목표 3회
-   취재 기사 게재: ${S.kpi.press||0}회 / 목표 4회
+  // AI 이력 (이번 주)
+  const weekHist=S.aiHistory.filter(h=>{
+    if(!h.date) return false;
+    const hd=new Date(h.date); return hd>=wr.mon&&hd<=wr.sun;
+  });
+  const aiLines=weekHist.length>0
+    ? weekHist.map(h=>`[${h.date}] ${h.summary||''}${h.extra_tasks&&h.extra_tasks.length?' | 기타: '+h.extra_tasks.join(', '):''}`)
+        .join('\n')
+    : '이번 주 AI 분析 이력 없음';
 
-4. 이달 운영 루틴 달성률
-   일일 루틴: ${getDaily().filter(t=>isChecked('daily',t.id)).length}/${DAILY.length}건 완료
-   주간 루틴: ${getWeekly().filter(t=>isChecked('weekly',t.id)).length}/${WEEKLY.length}건 완료
-   월간 루틴: ${getMonthly().filter(t=>isChecked('monthly',t.id)).length}/${MONTHLY.length}건 완료
-
-5. 기타 추가업무 현황 (AI 분석 추출)
-${aiExtraAll.length>0?aiExtraAll.map(item=>{
-    const task=aiCustomTasks.find(t=>t.title===item);
-    const done=task?isChecked('daily',task.id):false;
-    return `   ${done?'[완료]':'[미완]'} ${item}`;
-  }).join('\n'):'   없음'}
-
-6. 완료 확인된 업무
-${allCompleted.length>0?allCompleted.map(a=>`   · ${a}`).join('\n'):'   없음'}
-
-7. 특이사항
-   (직접 입력 후 복사)`;
-
-  const monthHistHtml = monthHistory.length>0 ?
-    monthHistory.map(h=>`<div class="rep-ai-item">
-      <b>${h.date}</b> [${h.analyst}] ${h.summary}
-      ${h.extra_tasks?.length?`<br><span style="color:var(--purple)">기타: ${h.extra_tasks.join(', ')}</span>`:''}
-    </div>`).join('')
-    : '<div style="font-size:12px;color:var(--text3)">이번 달 AI 분석 기록 없음</div>';
-
-  // 기타업무 완료 현황 카드
-  const extraStatusHtml = aiExtraAll.length>0 ? `
-    <div class="rep-box">
-      <div class="box-title" style="margin-bottom:12px;color:var(--purple)">➕ 기타 추가업무 현황 (${aiExtraAll.length}건)</div>
-      ${aiExtraAll.map(item=>{
+  // 기타 추가업무
+  const aiCustomTasks=S.customTasks.filter(t=>t.fromAI);
+  const extraAll=[...new Set(weekHist.flatMap(h=>h.extra_tasks||[]))];
+  const extraLines=extraAll.length>0
+    ? extraAll.map(item=>{
         const task=aiCustomTasks.find(t=>t.title===item);
         const done=task?isChecked('daily',task.id):false;
-        return `<div class="rep-ai-item" style="display:flex;align-items:center;gap:8px">
-          <span style="font-size:12px;font-weight:600;color:${done?'var(--green)':'var(--red)'};flex-shrink:0">${done?'✓완료':'미완'}</span>
-          <span style="${done?'text-decoration:line-through;color:var(--text3)':''}">${item}</span>
-        </div>`;
-      }).join('')}
-    </div>` : '';
+        return `[${done?'완료':'미완'}] ${item}`;
+      }).join('\n')
+    : '없음';
+
+  // 이벤트
+  const allEvs=[...getFixedEvents(),...S.customTasks.filter(t=>t.type==='event'&&t.due)];
+  const evLines=allEvs.sort((a,b)=>new Date(a.due)-new Date(b.due))
+    .filter(ev=>daysUntil(ev.due)>=-3&&daysUntil(ev.due)<=30)
+    .map(ev=>`${ev.due} | ${ev.title} (D${daysUntil(ev.due)>=0?'-'+daysUntil(ev.due):'+'+Math.abs(daysUntil(ev.due))})`)
+    .join('\n') || '없음';
+
+  // 기사 수
+  const art=S.repArticles||{};
+  const mail=S.repMailing||{};
+  const artLine=`편집국: ${art.editorial||0}건 | 대학생기자: ${art.student||0}건 | 자문위원: ${art.advisor||0}건 | 명예기자: ${art.honorary||0}건`;
+  const mailLine=mail.sent>0
+    ? `발송: ${(mail.sent||0).toLocaleString()}건 / 성공: ${(mail.success||0).toLocaleString()}건 (${mail.sent?Math.round(mail.success/mail.sent*100):0}%)`
+    : '미입력';
+
+  return `=== 세닷뉴스 편집국 주간 업무 데이터 ===
+기간: ${wr.label}
+작성일: ${fmtDate(TODAY)} | 작성자: ${cu?cu.name:'편집국장'}
+
+━━━ KPI 달성 현황 (이번 주) ━━━
+${kpiLines}
+
+━━━ 체크리스트 달성 ━━━
+오늘 업무  : ${dDone}/${dAll.length}건 완료 (${dAll.length?Math.round(dDone/dAll.length*100):0}%)
+주간 업무  : ${wDone}/${wTotal}건 완료 (${wTotal?Math.round(wDone/wTotal*100):0}%)
+월간 업무  : ${mDone}/${mAll.length}건 완료 (${mAll.length?Math.round(mDone/mAll.length*100):0}%)
+
+━━━ 기사 송출 현황 ━━━
+${artLine}
+메일링: ${mailLine}
+
+━━━ 이번 주 AI 분析 이력 (${weekHist.length}건) ━━━
+${aiLines}
+
+━━━ 기타 추가업무 ━━━
+${extraLines}
+
+━━━ 주요 이벤트 / 일정 ━━━
+${evLines}
+
+━━━ 편집국장 메모 / 특이사항 ━━━
+${S.repMemo||'(입력 없음)'}`;
+}
+
+// 월간 데이터 내보내기 텍스트
+function buildMonthlyExportText(){
+  const cu=getCurrentUser();
+  const mn=fmtMonth(TODAY);
+  const mk=mn;
+
+  // KPI 이달
+  const kpiMonLines=KPI_DEF.filter(k=>k.moTarget).map(k=>{
+    const cur=S.kpiMonthly[mk+'_'+k.key]||0;
+    const pct=Math.round(cur/k.moTarget*100);
+    const label=k.label.padEnd(14,'　');
+    return `${label}  ${asciiBar(pct)}  ${String(cur).padStart(2)}/${k.moTarget}건 (${String(pct).padStart(3)}%)`;
+  }).join('\n');
+
+  // KPI 누적
+  const tot=KPI_DEF.reduce((s,k)=>s+(S.kpi[k.key]||0),0);
+  const kpiTotPct=Math.round(tot/KPI_TOTAL_TARGET*100);
+  const kpiTotLines=KPI_DEF.map(k=>{
+    const cur=S.kpi[k.key]||0;
+    const pct=Math.round(cur/k.target*100);
+    const label=k.label.padEnd(14,'　');
+    return `${label}  ${asciiBar(pct)}  ${String(cur).padStart(3)}/${k.target}건 (${String(pct).padStart(3)}%)`;
+  }).join('\n');
+
+  // 체크리스트
+  const dAll=getDaily(); const dDone=dAll.filter(t=>isChecked('daily',t.id)).length;
+  const wDone=getWeekDone(); const wTotal=getWeeklyTotal();
+  const mAll=getMonthly(); const mDone=mAll.filter(t=>isChecked('monthly',t.id)).length;
+
+  // AI 이력 (이번 달)
+  const monHist=S.aiHistory.filter(h=>h.date&&h.date.startsWith(mn));
+  const aiLines=monHist.length>0
+    ? monHist.map(h=>`[${h.date}] ${h.summary||''}${h.extra_tasks&&h.extra_tasks.length?' | 기타: '+h.extra_tasks.join(', '):''}${h.events&&h.events.length?' | 이벤트: '+h.events.join(', '):''}`)
+        .join('\n')
+    : '이달 AI 분析 이력 없음';
+
+  // 기타 추가업무 (이달 이력 기반)
+  const aiCustomTasks=S.customTasks.filter(t=>t.fromAI);
+  const extraAll=[...new Set(monHist.flatMap(h=>h.extra_tasks||[]))];
+  const extraLines=extraAll.length>0
+    ? extraAll.map(item=>{
+        const task=aiCustomTasks.find(t=>t.title===item);
+        const done=task?isChecked('daily',task.id):false;
+        return `[${done?'완료':'미완'}] ${item}`;
+      }).join('\n')
+    : '없음';
+
+  // 홈페이지/회원 통계
+  const hp=S.repHomepage||{}, mb=S.repMembers||{};
+  const mail=S.repMailing||{};
+
+  // 이달 이벤트
+  const allEvs=[...getFixedEvents(),...S.customTasks.filter(t=>t.type==='event'&&t.due)];
+  const monEvs=allEvs.filter(ev=>ev.due&&ev.due.startsWith(mn));
+  const evLines=monEvs.map(ev=>{
+    const done=S.eventsDone[ev.id];
+    return `[${done?'완료':'예정'}] ${ev.due} | ${ev.title}`;
+  }).join('\n')||'없음';
+
+  return `=== 세닷뉴스 편집국 월간 업무 데이터 ===
+기간: ${mn} 한 달 간
+작성일: ${fmtDate(TODAY)} | 작성자: ${cu?cu.name:'편집국장'}
+
+━━━ 이달 KPI 달성 현황 ━━━
+${kpiMonLines}
+
+━━━ 누적 KPI 달성 현황 (연간 목표 대비) ━━━
+${kpiTotLines}
+── 누적 합계: ${tot}/${KPI_TOTAL_TARGET}건 (${kpiTotPct}%)
+
+━━━ 체크리스트 달성 ━━━
+일일 루틴: ${dDone}/${dAll.length}건 (${dAll.length?Math.round(dDone/dAll.length*100):0}%)
+주간 루틴: ${wDone}/${wTotal}건 (${wTotal?Math.round(wDone/wTotal*100):0}%)
+월간 루틴: ${mDone}/${mAll.length}건 (${mAll.length?Math.round(mDone/mAll.length*100):0}%)
+
+━━━ 채널 운영 통계 ━━━
+홈페이지: 방문자 ${hp.visitors||0}명 / 조회수 ${hp.pageviews||0}건
+닷뉴스 회원: ${mb.datnews||0}명 | 페이스북: ${mb.facebook||0}명 | 블로그: ${mb.blog||0}명
+메일링: 발송 ${(mail.sent||0).toLocaleString()}건 / 성공 ${(mail.success||0).toLocaleString()}건 (${mail.sent?Math.round(mail.success/mail.sent*100):0}%)
+
+━━━ 이달 AI 分析 이력 (${monHist.length}건) ━━━
+${aiLines}
+
+━━━ 기타 추가업무 ━━━
+${extraLines}
+
+━━━ 이달 이벤트 ━━━
+${evLines}
+
+━━━ 편집국장 월간 메모 / 특이사항 ━━━
+${S.repMemo||'(입력 없음)'}`;
+}
+
+// 데이터 복사
+function copyExportData(type){
+  const txt=type==='weekly'?buildWeeklyExportText():buildMonthlyExportText();
+  navigator.clipboard.writeText(txt).then(()=>{
+    S.repCopied=true; render();
+    setTimeout(()=>{ S.repCopied=false; render(); },2500);
+    showToast('✅ 클로드에 붙여넣기 하세요!');
+  });
+}
+
+// 보고서 저장 (Firebase)
+function saveReport(type){
+  const txt=type==='weekly'?buildWeeklyExportText():buildMonthlyExportText();
+  const wr=getWeekRange();
+  const record={
+    id:'rep'+Date.now(),
+    type, // 'weekly'|'monthly'
+    date: fmtDate(TODAY),
+    period: type==='weekly'?wr.label:fmtMonth(TODAY),
+    data: txt,
+    memo: S.repMemo||'',
+  };
+  S.savedReports=[record,...(S.savedReports||[])];
+  dbSet('savedReports', S.savedReports);
+  showToast('📁 보고서 데이터가 저장됐습니다');
+}
+
+// 저장된 보고서 복사
+function copySavedReport(idx){
+  const rep=S.savedReports[idx];
+  if(!rep) return;
+  navigator.clipboard.writeText(rep.data).then(()=>showToast('✅ 복사됐습니다. 클로드에 붙여넣기 하세요!'));
+}
+
+// 저장된 보고서 삭제
+function deleteSavedReport(idx){
+  if(!confirm('이 보고서 데이터를 삭제할까요?')) return;
+  S.savedReports.splice(idx,1);
+  dbSet('savedReports', S.savedReports);
+  render();
+}
+
+// 입력값 업데이트 헬퍼
+function setRepArticle(key, val){ S.repArticles[key]=parseInt(val)||0; }
+function setRepMailing(key, val){ S.repMailing[key]=parseInt(val)||0; }
+function setRepHomepage(key, val){ S.repHomepage[key]=parseInt(val)||0; }
+function setRepMembers(key, val){ S.repMembers[key]=parseInt(val)||0; }
+
+// ══════════════════════════════════════════════════════
+//  렌더 — 보고서 (클로드 내보내기 허브)
+// ══════════════════════════════════════════════════════
+function renderReport(){
+  const isWeekly=S.repTab==='weekly';
+  const mn=fmtMonth(TODAY);
+  const wr=getWeekRange();
+  const wk=fmtWeek(TODAY);
+
+  // KPI 데이터
+  const wkKpi=KPI_DEF.filter(k=>k.wkTarget).map(k=>{
+    const cur=S.kpiWeekly[wk+'_'+k.key]||0;
+    const pct=Math.min(100,Math.round(cur/k.wkTarget*100));
+    return {label:k.label, cur, tgt:k.wkTarget, pct};
+  });
+  const moKpi=KPI_DEF.filter(k=>k.moTarget).map(k=>{
+    const cur=S.kpiMonthly[mn+'_'+k.key]||0;
+    const pct=Math.min(100,Math.round(cur/k.moTarget*100));
+    return {label:k.label, cur, tgt:k.moTarget, pct};
+  });
+  const totKpi=KPI_DEF.reduce((s,k)=>s+(S.kpi[k.key]||0),0);
+  const totPct=Math.round(totKpi/KPI_TOTAL_TARGET*100);
+
+  // AI 이력
+  const weekHist=S.aiHistory.filter(h=>{
+    if(!h.date) return false;
+    const hd=new Date(h.date); return hd>=wr.mon&&hd<=wr.sun;
+  });
+  const monHist=S.aiHistory.filter(h=>h.date&&h.date.startsWith(mn));
+  const curHist=isWeekly?weekHist:monHist;
+
+  // 기타 추가업무
+  const aiCustomTasks=S.customTasks.filter(t=>t.fromAI);
+  const extraAll=[...new Set(curHist.flatMap(h=>h.extra_tasks||[]))];
+
+  // 체크리스트
+  const dAll=getDaily().filter(t=>assigneeMatch(t.assignee));
+  const dDone=dAll.filter(t=>isChecked('daily',t.id)).length;
+  const wDone=getWeekDone(); const wTotal=getWeeklyTotal();
+  const mAll=getMonthly().filter(t=>assigneeMatch(t.assignee));
+  const mDone=mAll.filter(t=>isChecked('monthly',t.id)).length;
+
+  // ── KPI 차트 HTML ──
+  const kpiData=isWeekly?wkKpi:moKpi;
+  const kpiChartHtml=kpiData.map(k=>{
+    const col=k.pct>=100?'var(--green)':k.pct>=70?'var(--navy)':'var(--red)';
+    return `<div style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3px">
+        <span style="font-size:12px;color:var(--text1);font-weight:500">${k.label}</span>
+        <span style="font-size:12px;font-weight:700;color:${col}">${k.cur}/${k.tgt}건 (${k.pct}%)</span>
+      </div>
+      <div style="background:#f1f5f9;border-radius:4px;height:10px;overflow:hidden">
+        <div style="height:10px;border-radius:4px;background:${col};width:${k.pct}%;transition:width .4s"></div>
+      </div>
+    </div>`;
+  }).join('');
+
+  // ── 저장된 보고서 목록 ──
+  const savedHtml=(S.savedReports||[]).length>0?`
+    <div class="rep-box" style="margin-top:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div class="box-title">📁 저장된 보고서 데이터 (${S.savedReports.length}건)</div>
+        <button onclick="S.showSaved=!S.showSaved;render()"
+          style="font-size:11px;color:var(--navy);border:1px solid var(--navy);border-radius:6px;padding:3px 8px;background:none;cursor:pointer;font-family:inherit">
+          ${S.showSaved?'접기':'펼치기'}
+        </button>
+      </div>
+      ${S.showSaved?(S.savedReports||[]).map((rep,i)=>`
+        <div style="background:#f8fafc;border-radius:8px;padding:10px 12px;margin-bottom:8px;border:1px solid #e2e8f0">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div>
+              <span style="font-size:12px;font-weight:700;color:${rep.type==='weekly'?'var(--navy)':'var(--purple)'}">${rep.type==='weekly'?'주간':'월간'}</span>
+              <span style="font-size:12px;color:var(--text2);margin-left:6px">${rep.period}</span>
+              <span style="font-size:11px;color:var(--text3);margin-left:6px">저장: ${rep.date}</span>
+            </div>
+            <div style="display:flex;gap:6px">
+              <button onclick="copySavedReport(${i})"
+                style="font-size:11px;padding:4px 8px;background:var(--navy);color:#fff;border:none;border-radius:5px;cursor:pointer;font-family:inherit">복사</button>
+              <button onclick="deleteSavedReport(${i})"
+                style="font-size:11px;padding:4px 8px;background:#fff;color:var(--red);border:1px solid #fecaca;border-radius:5px;cursor:pointer;font-family:inherit">삭제</button>
+            </div>
+          </div>
+          ${rep.memo?`<div style="font-size:11px;color:var(--text2);margin-top:5px;padding-top:5px;border-top:1px solid #e2e8f0">메모: ${rep.memo.slice(0,80)}${rep.memo.length>80?'...':''}</div>`:''}
+        </div>`).join(''):''}
+    </div>`:'';
+
+  // ── 주간 추가입력 ──
+  const weeklyInputHtml=`
+    <div class="rep-box">
+      <div class="box-title" style="margin-bottom:12px">📊 주간 추가 입력</div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:10px">이 수치가 클로드 내보내기 데이터에 자동 포함됩니다</div>
+      <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:6px">기사 송출 수</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+        ${[['editorial','편집국'],['student','대학생기자'],['advisor','자문위원'],['honorary','명예기자']].map(([k,l])=>`
+          <div>
+            <div style="font-size:11px;color:var(--text3);margin-bottom:3px">${l}</div>
+            <input type="number" min="0" value="${(S.repArticles||{})[k]||0}"
+              style="width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:7px;font-size:14px;font-weight:600;text-align:center;background:#f8fafc;box-sizing:border-box"
+              onchange="setRepArticle('${k}',this.value)" oninput="setRepArticle('${k}',this.value)"/>
+          </div>`).join('')}
+      </div>
+      <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:6px">메일링 현황</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        ${[['sent','발송 건수'],['success','성공 건수']].map(([k,l])=>`
+          <div>
+            <div style="font-size:11px;color:var(--text3);margin-bottom:3px">${l}</div>
+            <input type="number" min="0" value="${(S.repMailing||{})[k]||0}"
+              style="width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:7px;font-size:14px;font-weight:600;text-align:center;background:#f8fafc;box-sizing:border-box"
+              onchange="setRepMailing('${k}',this.value)" oninput="setRepMailing('${k}',this.value)"/>
+          </div>`).join('')}
+      </div>
+    </div>`;
+
+  // ── 월간 추가입력 ──
+  const monthlyInputHtml=`
+    <div class="rep-box">
+      <div class="box-title" style="margin-bottom:12px">📊 월간 추가 입력</div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:10px">GA/네이버 통계에서 복사해서 입력하세요</div>
+      <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:6px">홈페이지 통계</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+        ${[['visitors','방문자 수'],['pageviews','조회수']].map(([k,l])=>`
+          <div>
+            <div style="font-size:11px;color:var(--text3);margin-bottom:3px">${l}</div>
+            <input type="number" min="0" value="${(S.repHomepage||{})[k]||0}"
+              style="width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:7px;font-size:14px;font-weight:600;text-align:center;background:#f8fafc;box-sizing:border-box"
+              onchange="setRepHomepage('${k}',this.value)" oninput="setRepHomepage('${k}',this.value)"/>
+          </div>`).join('')}
+      </div>
+      <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:6px">채널 회원 수</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px">
+        ${[['datnews','닷뉴스'],['facebook','페이스북'],['blog','블로그']].map(([k,l])=>`
+          <div>
+            <div style="font-size:11px;color:var(--text3);margin-bottom:3px">${l}</div>
+            <input type="number" min="0" value="${(S.repMembers||{})[k]||0}"
+              style="width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:7px;font-size:14px;font-weight:600;text-align:center;background:#f8fafc;box-sizing:border-box"
+              onchange="setRepMembers('${k}',this.value)" oninput="setRepMembers('${k}',this.value)"/>
+          </div>`).join('')}
+      </div>
+      <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:6px">메일링 현황</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        ${[['sent','발송 건수'],['success','성공 건수']].map(([k,l])=>`
+          <div>
+            <div style="font-size:11px;color:var(--text3);margin-bottom:3px">${l}</div>
+            <input type="number" min="0" value="${(S.repMailing||{})[k]||0}"
+              style="width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:7px;font-size:14px;font-weight:600;text-align:center;background:#f8fafc;box-sizing:border-box"
+              onchange="setRepMailing('${k}',this.value)" oninput="setRepMailing('${k}',this.value)"/>
+          </div>`).join('')}
+      </div>
+    </div>`;
 
   return `<div class="rep-wrap">
-    <div class="rep-box">
-      <div class="rep-hd">
-        <div class="box-title">편집국 월간 보고서 (${mn})</div>
-        <button class="copy-btn" onclick="copyRep()">${S.copied?'✓ 복사됨':'복사'}</button>
+
+    <!-- 서브탭 -->
+    <div style="display:flex;border-radius:10px;overflow:hidden;border:1px solid #e2e8f0;margin-bottom:2px">
+      <button onclick="S.repTab='weekly';S.repCopied=false;render()"
+        style="flex:1;padding:13px;border:none;background:${isWeekly?'var(--navy)':'#f8fafc'};color:${isWeekly?'#fff':'var(--text2)'};font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">
+        📄 주간 내보내기
+      </button>
+      <button onclick="S.repTab='monthly';S.repCopied=false;render()"
+        style="flex:1;padding:13px;border:none;border-left:1px solid #e2e8f0;background:${!isWeekly?'var(--navy)':'#f8fafc'};color:${!isWeekly?'#fff':'var(--text2)'};font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">
+        📋 월간 내보내기
+      </button>
+    </div>
+
+    <!-- 안내 배너 -->
+    <div style="background:#eff6ff;border-radius:8px;padding:10px 14px;margin-bottom:10px;border:1px solid #bfdbfe">
+      <div style="font-size:12px;color:#1e40af;line-height:1.6">
+        <b>💡 사용 방법</b><br>
+        ① 아래 추가 입력 작성 → ② 메모 입력 → ③ <b style="color:var(--navy)">클로드 데이터 복사</b> 버튼<br>
+        → ④ Claude 프로젝트에 붙여넣기 → ⑤ "주간/월간 보고서 작성해줘"
       </div>
-      <pre class="rep-pre" id="rep-txt">${reportTxt}</pre>
     </div>
-    ${extraStatusHtml}
+
+    <!-- 추가 입력 -->
+    ${isWeekly?weeklyInputHtml:monthlyInputHtml}
+
+    <!-- 편집국장 메모 -->
     <div class="rep-box">
-      <div class="box-title" style="margin-bottom:12px">📋 이달 AI 분석 이력 (${monthHistory.length}건)</div>
-      ${monthHistHtml}
+      <div class="box-title" style="margin-bottom:8px">✏️ 편집국장 메모 / 특이사항</div>
+      <textarea id="rep-memo-ta" placeholder="이번 주 특이사항, 이슈, 차주 계획 등 자유롭게 입력..."
+        style="width:100%;min-height:90px;padding:10px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box;background:#f8fafc;line-height:1.6"
+        oninput="S.repMemo=this.value">${S.repMemo||''}</textarea>
     </div>
-    ${allEvents.length||customEvts.length?`<div class="rep-box">
-      <div class="box-title" style="margin-bottom:12px;color:var(--amber)">📅 추가 이벤트 현황</div>
-      ${allEvents.map(e=>`<div class="rep-ai-item">📅 ${e}</div>`).join('')}
-      ${customEvts.filter(e=>!e.fromAI).map(e=>`<div class="rep-ai-item">📌 ${e.title} <span style="color:var(--text2)">(${e.due})</span></div>`).join('')}
+
+    <!-- KPI 달성 차트 -->
+    <div class="rep-box">
+      <div class="box-title" style="margin-bottom:14px">📊 KPI 달성 현황 (${isWeekly?'이번 주':'이번 달'})</div>
+      ${kpiChartHtml}
+      ${!isWeekly?`<div style="margin-top:12px;padding:10px;background:#eff6ff;border-radius:8px;text-align:center">
+        <div style="font-size:22px;font-weight:700;color:${totPct>=80?'var(--green)':totPct>=50?'var(--navy)':'var(--red)'}">${totPct}%</div>
+        <div style="font-size:11px;color:var(--text2);margin-top:2px">연간 누적 달성 ${totKpi}/${KPI_TOTAL_TARGET}건</div>
+      </div>`:''}
+    </div>
+
+    <!-- 체크리스트 달성 -->
+    <div class="rep-box">
+      <div class="box-title" style="margin-bottom:12px">✅ 체크리스트 달성</div>
+      ${[['오늘 업무',dDone,dAll.length,'var(--red)'],
+         ['주간 업무',wDone,wTotal,'var(--amber)'],
+         ['월간 업무',mDone,mAll.length,'var(--navy)']].map(([lbl,done,total,col])=>{
+        const pct=total?Math.round(done/total*100):0;
+        const c=pct>=100?'var(--green)':pct>=60?col:'var(--red)';
+        return `<div style="margin-bottom:10px">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3px">
+            <span style="font-size:12px;color:var(--text1)">${lbl}</span>
+            <span style="font-size:12px;font-weight:700;color:${c}">${done}/${total}건 (${pct}%)</span>
+          </div>
+          <div style="background:#f1f5f9;border-radius:4px;height:8px;overflow:hidden">
+            <div style="height:8px;border-radius:4px;background:${c};width:${pct}%;transition:width .4s"></div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+
+    <!-- AI 이력 요약 -->
+    <div class="rep-box">
+      <div class="box-title" style="margin-bottom:10px">🤖 ${isWeekly?'이번 주':'이달'} AI 분析 이력 (${curHist.length}건)</div>
+      ${curHist.length>0
+        ? curHist.slice().reverse().map(h=>`
+            <div style="padding:8px 0;border-bottom:1px solid #f1f5f9">
+              <div style="font-size:11px;color:var(--text3);margin-bottom:2px">${h.date} · ${h.analyst||''}</div>
+              <div style="font-size:13px;color:var(--text1)">${h.summary||'(요약 없음)'}</div>
+              ${h.extra_tasks&&h.extra_tasks.length?`<div style="font-size:11px;color:var(--purple);margin-top:3px">기타: ${h.extra_tasks.join(' · ')}</div>`:''}
+            </div>`).join('')
+        : `<div style="font-size:12px;color:var(--text3);text-align:center;padding:12px">
+            AI분析 탭에서 업무 내용을 분석하고 저장하면 여기에 표시됩니다
+          </div>`}
+    </div>
+
+    <!-- 기타 추가업무 -->
+    ${extraAll.length>0?`<div class="rep-box">
+      <div class="box-title" style="color:var(--purple);margin-bottom:10px">➕ 기타 추가업무 (${extraAll.length}건)</div>
+      ${extraAll.map(item=>{
+        const task=aiCustomTasks.find(t=>t.title===item);
+        const done=task?isChecked('daily',task.id):false;
+        return `<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid #f8fafc">
+          <span style="font-size:11px;font-weight:700;min-width:28px;color:${done?'var(--green)':'var(--red)'}">${done?'✓':'○'}</span>
+          <span style="font-size:13px;${done?'text-decoration:line-through;color:var(--text3)':''}">${item}</span>
+        </div>`;
+      }).join('')}
     </div>`:''}
+
+    <!-- 복사 + 저장 버튼 (핵심) -->
+    <div style="display:flex;gap:8px;margin-top:4px;padding:0 2px">
+      <button onclick="copyExportData('${isWeekly?'weekly':'monthly'}')"
+        style="flex:2;padding:15px;background:${S.repCopied?'var(--green)':'var(--navy)'};color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;transition:background .2s">
+        ${S.repCopied?'✅ 복사됨 — Claude에 붙여넣기!':'📋 클로드 데이터 복사'}
+      </button>
+      <button onclick="saveReport('${isWeekly?'weekly':'monthly'}')"
+        style="flex:1;padding:15px;background:#f8fafc;color:var(--navy);border:1px solid var(--navy);border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">
+        📁 저장
+      </button>
+    </div>
+    <div style="text-align:center;font-size:11px;color:var(--text3);margin-top:6px">
+      복사 후 Claude 프로젝트 "세닷뉴스 편집국 보고서"에 붙여넣기하세요
+    </div>
+
+    <!-- 저장된 보고서 -->
+    ${savedHtml}
+
   </div>`;
 }
 
@@ -1368,19 +1983,19 @@ const TABS=[
   {id:'checklist',icon:'☑',label:'체크리스트'},
   {id:'kpi',icon:'◎',label:'KPI'},
   {id:'ai',icon:'◈',label:'AI분석'},
-  {id:'report',icon:'≡',label:'보고서'},
 ];
 function getVisibleTabs(){
   const tabs=[...TABS];
-  if(isAdmin()) tabs.push({id:'admin',icon:'🛡',label:'관리자'});
+  if(isAdmin()){
+    tabs.push({id:'report',icon:'≡',label:'보고서'});
+    tabs.push({id:'admin',icon:'🛡',label:'관리자'});
+  }
   return tabs;
 }
 // 탭별 접근 권한
 function canAccessTab(tabId){
-  if(isAdmin()) return true;
-  if(tabId==='admin') return false;           // 관리자만
-  if(tabId==='report') return isAdmin();      // 보고서 편집국장만
-  return true;                                 // 나머지 전체
+  if(tabId==='admin'||tabId==='report') return isAdmin();
+  return true;
 }
 function renderAdmin(){
   // 관리자 전용 — 전체 현황 대시보드
@@ -1390,9 +2005,9 @@ function renderAdmin(){
     const wDone=getWeekly().reduce((s,t)=>s+Math.min(getWCount(t.id),t.t),0);
     const mDone=getMonthly().filter(t=>isChecked('monthly',t.id)).length;
     S.currentUserId=savedUid;
-    const dPct=DAILY.length?Math.round(dDone/DAILY.length*100):0;
+    const dPct=getDaily().length?Math.round(dDone/getDaily().length*100):0;
     const wPct=getWeeklyTotal()?Math.round(wDone/getWeeklyTotal()*100):0;
-    const mPct=MONTHLY.length?Math.round(mDone/MONTHLY.length*100):0;
+    const mPct=getMonthly().length?Math.round(mDone/getMonthly().length*100):0;
     const col=dPct>=100?'var(--green)':dPct>=60?'var(--navy)':isWeekday(TODAY)?'var(--red)':'var(--text3)';
     return `<div style="background:var(--card);border-radius:var(--radius);border:1px solid var(--border);padding:14px;margin-bottom:10px">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
@@ -1404,9 +2019,9 @@ function renderAdmin(){
         <div style="margin-left:auto;font-size:18px;font-weight:700;color:${col}">${dPct}%</div>
       </div>
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
-        ${[['오늘',dDone,DAILY.length,dPct,'var(--red)'],
+        ${[['오늘',dDone,getDaily().length,dPct,'var(--red)'],
            ['주간',wDone,getWeeklyTotal(),wPct,'var(--amber)'],
-           ['월간',mDone,MONTHLY.length,mPct,'var(--navy)']].map(([lbl,done,total,pct,baseCol])=>{
+           ['월간',mDone,getMonthly().length,mPct,'var(--navy)']].map(([lbl,done,total,pct,baseCol])=>{
           const c=pct>=100?'var(--green)':pct>=60?baseCol:'var(--red)';
           return `<div style="text-align:center;padding:8px;background:#f8fafc;border-radius:8px">
             <div style="font-size:16px;font-weight:700;color:${c}">${pct}%</div>
@@ -1472,6 +2087,25 @@ function renderAdmin(){
       <div style="font-size:11px;color:var(--text3);margin-bottom:10px">제목·날짜 수정 후 자동 저장됩니다</div>
       ${evRows}
     </div>
+    <div style="background:var(--card);border-radius:var(--radius);border:1px solid var(--border);padding:14px;margin-top:10px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <div style="font-size:13px;font-weight:700;color:var(--text1)">🔐 관리자 PIN 변경</div>
+        ${S.adminPin
+          ? '<span style="font-size:11px;background:#d1fae5;color:#065f46;padding:2px 8px;border-radius:10px;font-weight:600">설정됨</span>'
+          : '<span style="font-size:11px;background:#fee2e2;color:#991b1b;padding:2px 8px;border-radius:10px;font-weight:600">미설정</span>'}
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:12px;line-height:1.6">숫자 4자리 PIN. Firebase에 암호화 저장되어 모든 기기에 동기화됩니다.</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <input id="pin-new-a" type="password" inputmode="numeric" maxlength="4" placeholder="새 PIN 4자리"
+          style="padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:20px;text-align:center;letter-spacing:10px;font-family:monospace;background:#f8fafc"/>
+        <input id="pin-confirm-a" type="password" inputmode="numeric" maxlength="4" placeholder="PIN 확인"
+          style="padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:20px;text-align:center;letter-spacing:10px;font-family:monospace;background:#f8fafc"/>
+        <button onclick="changeAdminPin()"
+          style="padding:12px;background:var(--navy);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">
+          PIN 변경 저장
+        </button>
+      </div>
+    </div>
   </div>`;
 }
 function render(){
@@ -1520,7 +2154,7 @@ function openAdd(){
 }
 function adj(k,d){S.kpi[k]=Math.max(0,(S.kpi[k]||0)+d);dbSet('kpi',S.kpi);render();}
 function setK(k,v){S.kpi[k]=Math.max(0,parseInt(v)||0);dbSet('kpi',S.kpi);render();}
-function adjW(k,d){const key=fmtWeek(TODAY)+'_'+k;S.kpiWeekly[key]=Math.max(0,(S.kpiWeekly[key]||0)+d);dbSet('kpiWeekly',S.kpiWeekly);render();}
+function adjKpiW(k,d){const key=fmtWeek(TODAY)+'_'+k;S.kpiWeekly[key]=Math.max(0,(S.kpiWeekly[key]||0)+d);dbSet('kpiWeekly',S.kpiWeekly);render();}
 function setKW(k,v){const key=fmtWeek(TODAY)+'_'+k;S.kpiWeekly[key]=Math.max(0,parseInt(v)||0);dbSet('kpiWeekly',S.kpiWeekly);render();}
 function adjM(k,d){const key=fmtMonth(TODAY)+'_'+k;S.kpiMonthly[key]=Math.max(0,(S.kpiMonthly[key]||0)+d);dbSet('kpiMonthly',S.kpiMonthly);render();}
 function setKM(k,v){const key=fmtMonth(TODAY)+'_'+k;S.kpiMonthly[key]=Math.max(0,parseInt(v)||0);dbSet('kpiMonthly',S.kpiMonthly);render();}
